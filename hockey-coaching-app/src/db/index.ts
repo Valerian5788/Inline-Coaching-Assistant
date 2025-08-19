@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Team, Player, Season, Game, Shot, GoalAgainst } from '../types';
+import type { Team, Player, Season, Game, Shot, GoalAgainst, GameEvent } from '../types';
 
 export class HockeyDB extends Dexie {
   teams!: Table<Team>;
@@ -8,6 +8,7 @@ export class HockeyDB extends Dexie {
   games!: Table<Game>;
   shots!: Table<Shot>;
   goalsAgainst!: Table<GoalAgainst>;
+  gameEvents!: Table<GameEvent>;
 
   constructor() {
     super('HockeyCoachingDB');
@@ -18,7 +19,8 @@ export class HockeyDB extends Dexie {
       seasons: 'id, name, status, type, startDate, endDate',
       games: 'id, seasonId, homeTeamId, date, status',
       shots: 'id, gameId, period, timestamp, result, teamSide',
-      goalsAgainst: 'id, gameId, period, timestamp'
+      goalsAgainst: 'id, gameId, period, timestamp',
+      gameEvents: 'id, gameId, type, period, gameTime, timestamp'
     });
   }
 }
@@ -134,6 +136,12 @@ export const dbHelpers = {
   },
 
   // Games
+  async getAllGames(): Promise<Game[]> {
+    const games = await db.games.toArray();
+    // Sort by date, most recent first
+    return games.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  },
+
   async getGamesBySeason(seasonId: string): Promise<Game[]> {
     return await db.games.where('seasonId').equals(seasonId).toArray();
   },
@@ -152,9 +160,10 @@ export const dbHelpers = {
 
   async deleteGame(id: string): Promise<void> {
     await db.games.delete(id);
-    // Also delete all shots and goals against from this game
+    // Also delete all shots, goals against, and events from this game
     await db.shots.where('gameId').equals(id).delete();
     await db.goalsAgainst.where('gameId').equals(id).delete();
+    await db.gameEvents.where('gameId').equals(id).delete();
   },
 
   // Shots
@@ -189,5 +198,26 @@ export const dbHelpers = {
 
   async deleteGoalAgainst(id: string): Promise<void> {
     await db.goalsAgainst.delete(id);
+  },
+
+  // Game Events
+  async getEventsByGame(gameId: string): Promise<GameEvent[]> {
+    return await db.gameEvents.where('gameId').equals(gameId).toArray();
+  },
+
+  async createGameEvent(event: GameEvent): Promise<string> {
+    return await db.gameEvents.add(event);
+  },
+
+  async updateGameEvent(id: string, changes: Partial<GameEvent>): Promise<number> {
+    return await db.gameEvents.update(id, changes);
+  },
+
+  async deleteGameEvent(id: string): Promise<void> {
+    await db.gameEvents.delete(id);
+  },
+
+  async deleteGameEventsByGame(gameId: string): Promise<void> {
+    await db.gameEvents.where('gameId').equals(gameId).delete();
   }
 };

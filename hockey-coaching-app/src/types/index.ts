@@ -73,13 +73,29 @@ export interface GoalAgainst {
   reason?: string;
 }
 
+export type GameEventType = 'period_start' | 'period_end' | 'goal_home' | 'goal_away' | 'timeout' | 'penalty' | 'game_start' | 'game_end';
+
+export interface GameEvent {
+  id: string;
+  gameId: string;
+  type: GameEventType;
+  period: number;
+  gameTime: number; // Time in seconds from game start
+  timestamp: number; // Unix timestamp when event occurred
+  description: string;
+  data?: any; // Additional event-specific data
+}
+
 export interface GameState {
   currentGame: Game | null;
   isTracking: boolean;
   isPaused: boolean;
   startTime: number | null;
+  gameTime: number; // Current game time in seconds
+  periodStartTime: number | null;
   shots: Shot[];
   goalsAgainst: GoalAgainst[];
+  events: GameEvent[];
 }
 
 export interface AppState {

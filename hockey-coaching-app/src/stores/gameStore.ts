@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { GameState, Game, Shot, GoalAgainst, TeamSide } from '../types';
+import type { GameState, Game, Shot, GoalAgainst, TeamSide, GameEvent, GameEventType } from '../types';
 import { dbHelpers } from '../db';
 
 interface GameStore extends GameState {
+  // Timer
+  timerInterval: NodeJS.Timeout | null;
   // Actions
   setCurrentGame: (game: Game | null) => void;
   startTracking: () => void;
@@ -16,6 +18,20 @@ interface GameStore extends GameState {
   updateGamePeriod: (period: number, teamSide: TeamSide) => Promise<void>;
   loadGameData: (gameId: string) => Promise<void>;
   clearGameData: () => void;
+  // Game management
+  initializeLiveGame: (game: Game) => Promise<void>;
+  updateGameStatus: (gameId: string, status: 'planned' | 'live' | 'archived') => Promise<void>;
+  endGame: () => Promise<void>;
+  // Timer management
+  adjustTime: (seconds: number) => void;
+  setGameTime: (seconds: number) => void;
+  startPeriod: (period: number) => Promise<void>;
+  endPeriod: () => Promise<void>;
+  // Event management
+  addGameEvent: (type: GameEventType, description: string, data?: any) => Promise<void>;
+  // Score management  
+  addHomeGoal: () => Promise<void>;
+  addAwayGoal: () => Promise<void>;
 }
 
 export const useGameStore = create<GameStore>()(
@@ -26,23 +42,55 @@ export const useGameStore = create<GameStore>()(
       isTracking: false,
       isPaused: false,
       startTime: null,
+      gameTime: 0,
+      periodStartTime: null,
       shots: [],
       goalsAgainst: [],
+      events: [],
+      timerInterval: null,
 
       // Actions
       setCurrentGame: (game) => set({ currentGame: game }),
 
-      startTracking: () => set({ 
-        isTracking: true, 
-        isPaused: false, 
-        startTime: Date.now() 
-      }),
+      startTracking: () => {
+        const { timerInterval } = get();
+        
+        // Clear any existing interval
+        if (timerInterval) {
+          clearInterval(timerInterval);
+        }
+        
+        // Start new timer interval
+        const newInterval = setInterval(() => {
+          const { isPaused, currentGame } = get();
+          if (!isPaused && currentGame) {
+            set(state => ({ gameTime: state.gameTime + 1 }));
+          }
+        }, 1000);
+        
+        set({ 
+          isTracking: true, 
+          isPaused: false, 
+          startTime: Date.now(),
+          periodStartTime: Date.now(),
+          timerInterval: newInterval
+        });
+      },
 
-      stopTracking: () => set({ 
-        isTracking: false, 
-        isPaused: false, 
-        startTime: null 
-      }),
+      stopTracking: () => {
+        const { timerInterval } = get();
+        if (timerInterval) {
+          clearInterval(timerInterval);
+        }
+        
+        set({ 
+          isTracking: false, 
+          isPaused: false, 
+          startTime: null,
+          periodStartTime: null,
+          timerInterval: null
+        });
+      },
 
       pauseTracking: () => set({ isPaused: true }),
 
@@ -97,25 +145,185 @@ export const useGameStore = create<GameStore>()(
       },
 
       loadGameData: async (gameId) => {
-        const game = await dbHelpers.getGameById(gameId);
-        const shots = await dbHelpers.getShotsByGame(gameId);
-        const goalsAgainst = await dbHelpers.getGoalsAgainstByGame(gameId);
+        const [game, shots, goalsAgainst, events] = await Promise.all([
+          dbHelpers.getGameById(gameId),
+          dbHelpers.getShotsByGame(gameId),
+          dbHelpers.getGoalsAgainstByGame(gameId),
+          dbHelpers.getEventsByGame(gameId)
+        ]);
 
         set({
           currentGame: game || null,
           shots,
-          goalsAgainst
+          goalsAgainst,
+          events
         });
       },
 
-      clearGameData: () => set({
-        currentGame: null,
-        isTracking: false,
-        isPaused: false,
-        startTime: null,
-        shots: [],
-        goalsAgainst: []
-      })
+      clearGameData: () => {
+        const { timerInterval } = get();
+        if (timerInterval) {
+          clearInterval(timerInterval);
+        }
+        
+        set({
+          currentGame: null,
+          isTracking: false,
+          isPaused: false,
+          startTime: null,
+          gameTime: 0,
+          periodStartTime: null,
+          shots: [],
+          goalsAgainst: [],
+          events: [],
+          timerInterval: null
+        });
+      },
+
+      // Game management functions
+      initializeLiveGame: async (game) => {
+        // Set game status to live
+        await dbHelpers.updateGame(game.id, { status: 'live', currentPeriod: 1, homeScore: 0, awayScore: 0 });
+        const updatedGame = { ...game, status: 'live' as const, currentPeriod: 1, homeScore: 0, awayScore: 0 };
+        
+        // Load game data and start tracking
+        await get().loadGameData(game.id);
+        set({ 
+          currentGame: updatedGame,
+          gameTime: 0
+        });
+        
+        // Add game start event
+        await get().addGameEvent('game_start', 'Game started');
+        await get().startPeriod(1);
+      },
+
+      updateGameStatus: async (gameId, status) => {
+        await dbHelpers.updateGame(gameId, { status });
+        const { currentGame } = get();
+        if (currentGame && currentGame.id === gameId) {
+          set({ currentGame: { ...currentGame, status } });
+        }
+      },
+
+      endGame: async () => {
+        const { currentGame, timerInterval } = get();
+        if (!currentGame) return;
+
+        // Add game end event
+        await get().addGameEvent('game_end', 'Game ended');
+        
+        // Stop timer
+        if (timerInterval) {
+          clearInterval(timerInterval);
+        }
+
+        // Update game status to archived
+        await dbHelpers.updateGame(currentGame.id, { status: 'archived' });
+        
+        // Stop tracking and clear data
+        set({
+          currentGame: { ...currentGame, status: 'archived' },
+          isTracking: false,
+          isPaused: false,
+          startTime: null,
+          periodStartTime: null,
+          timerInterval: null
+        });
+      },
+
+      // Timer management
+      adjustTime: (seconds) => {
+        set(state => ({ 
+          gameTime: Math.max(0, state.gameTime + seconds) 
+        }));
+      },
+
+      setGameTime: (seconds) => {
+        set({ gameTime: Math.max(0, seconds) });
+      },
+
+      startPeriod: async (period) => {
+        const { currentGame } = get();
+        if (!currentGame) return;
+
+        // Update game with current period
+        await dbHelpers.updateGame(currentGame.id, { currentPeriod: period });
+        
+        // Add period start event
+        await get().addGameEvent('period_start', `Period ${period} started`);
+        
+        // Start or resume tracking
+        get().startTracking();
+        
+        set(state => ({
+          currentGame: { ...state.currentGame!, currentPeriod: period }
+        }));
+      },
+
+      endPeriod: async () => {
+        const { currentGame, timerInterval } = get();
+        if (!currentGame || !currentGame.currentPeriod) return;
+
+        // Stop timer
+        if (timerInterval) {
+          clearInterval(timerInterval);
+        }
+
+        // Add period end event
+        await get().addGameEvent('period_end', `Period ${currentGame.currentPeriod} ended`);
+        
+        set({
+          isTracking: false,
+          isPaused: false,
+          timerInterval: null
+        });
+      },
+
+      // Event management
+      addGameEvent: async (type, description, data = null) => {
+        const { currentGame, gameTime, events } = get();
+        if (!currentGame) return;
+
+        const event: GameEvent = {
+          id: crypto.randomUUID(),
+          gameId: currentGame.id,
+          type,
+          period: currentGame.currentPeriod || 1,
+          gameTime,
+          timestamp: Date.now(),
+          description,
+          data
+        };
+
+        await dbHelpers.createGameEvent(event);
+        set({ events: [...events, event] });
+      },
+
+      // Score management
+      addHomeGoal: async () => {
+        const { currentGame } = get();
+        if (!currentGame) return;
+
+        const newScore = (currentGame.homeScore || 0) + 1;
+        await get().updateGameScore(newScore, currentGame.awayScore || 0);
+        await get().addGameEvent('goal_home', `Home team goal (${newScore}-${currentGame.awayScore || 0})`);
+        
+        // Pause tracking on goal
+        get().pauseTracking();
+      },
+
+      addAwayGoal: async () => {
+        const { currentGame } = get();
+        if (!currentGame) return;
+
+        const newScore = (currentGame.awayScore || 0) + 1;
+        await get().updateGameScore(currentGame.homeScore || 0, newScore);
+        await get().addGameEvent('goal_away', `Away team goal (${currentGame.homeScore || 0}-${newScore})`);
+        
+        // Pause tracking on goal
+        get().pauseTracking();
+      }
     }),
     {
       name: 'game-store',
@@ -124,7 +332,9 @@ export const useGameStore = create<GameStore>()(
         currentGame: state.currentGame,
         isTracking: state.isTracking,
         isPaused: state.isPaused,
-        startTime: state.startTime
+        startTime: state.startTime,
+        gameTime: state.gameTime,
+        periodStartTime: state.periodStartTime
       })
     }
   )
