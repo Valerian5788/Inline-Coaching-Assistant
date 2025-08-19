@@ -1,0 +1,2 @@
+Place your rink.png image file here for the live tracking interface.
+The image should show a top-down view of an inline hockey rink.
