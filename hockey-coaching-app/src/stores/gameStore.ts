@@ -32,6 +32,13 @@ interface GameStore extends GameState {
   // Score management  
   addHomeGoal: () => Promise<void>;
   addAwayGoal: () => Promise<void>;
+  // Undo functionality
+  undoLastShot: () => Promise<boolean>;
+  // Timeout management
+  useTimeout: () => Promise<void>;
+  // Faceoff tracking
+  addFaceoffWin: () => Promise<void>;
+  addFaceoffLoss: () => Promise<void>;
 }
 
 export const useGameStore = create<GameStore>()(
@@ -323,6 +330,52 @@ export const useGameStore = create<GameStore>()(
         
         // Pause tracking on goal
         get().pauseTracking();
+      },
+
+      // Undo functionality
+      undoLastShot: async () => {
+        const { currentGame, shots } = get();
+        if (!currentGame || shots.length === 0) return false;
+
+        // Get the last shot
+        const lastShot = shots[shots.length - 1];
+        
+        // Remove from database
+        await dbHelpers.deleteShot(lastShot.id);
+        
+        // Update local state
+        set({ shots: shots.slice(0, -1) });
+        
+        return true;
+      },
+
+      // Timeout management
+      useTimeout: async () => {
+        const { currentGame } = get();
+        if (!currentGame || currentGame.timeoutUsed) return;
+
+        // Update game with timeout used
+        await dbHelpers.updateGame(currentGame.id, { timeoutUsed: true });
+        
+        // Add timeout event
+        await get().addGameEvent('timeout', 'Timeout used');
+        
+        // Pause the game
+        get().pauseTracking();
+        
+        // Update local state
+        set(state => ({
+          currentGame: { ...state.currentGame!, timeoutUsed: true }
+        }));
+      },
+
+      // Faceoff tracking
+      addFaceoffWin: async () => {
+        await get().addGameEvent('faceoff_won', 'Faceoff won');
+      },
+
+      addFaceoffLoss: async () => {
+        await get().addGameEvent('faceoff_lost', 'Faceoff lost');
       }
     }),
     {

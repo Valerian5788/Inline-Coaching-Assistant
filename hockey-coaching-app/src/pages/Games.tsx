@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Game, Team, Season } from '../types';
+import type { Game, Team, Season, RinkSide } from '../types';
 import { dbHelpers } from '../db';
 import { useAppStore } from '../stores/appStore';
 import { useGameStore } from '../stores/gameStore';
@@ -13,7 +13,10 @@ import {
   Archive, 
   CalendarDays,
   Trophy,
-  Trash2
+  Trash2,
+  ArrowLeft,
+  ArrowRight,
+  Zap
 } from 'lucide-react';
 
 const Games: React.FC = () => {
@@ -23,6 +26,8 @@ const Games: React.FC = () => {
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
+  const [isSideSelectionOpen, setIsSideSelectionOpen] = useState(false);
+  const [selectedGameForStart, setSelectedGameForStart] = useState<Game | null>(null);
   const [filters, setFilters] = useState({
     team: '',
     season: '',
@@ -129,7 +134,21 @@ const Games: React.FC = () => {
   };
 
   const handleStartLiveTracking = async (game: Game) => {
-    await initializeLiveGame(game);
+    setSelectedGameForStart(game);
+    setIsSideSelectionOpen(true);
+  };
+
+  const handleSideSelection = async (side: RinkSide) => {
+    if (!selectedGameForStart) return;
+    
+    // Update game with initial team side
+    const updatedGame = { ...selectedGameForStart, initialTeamSide: side };
+    await dbHelpers.updateGame(selectedGameForStart.id, { initialTeamSide: side });
+    
+    setIsSideSelectionOpen(false);
+    setSelectedGameForStart(null);
+    
+    await initializeLiveGame(updatedGame);
     navigate('/live');
   };
 
@@ -152,6 +171,43 @@ const Games: React.FC = () => {
       hasOvertime: true,
       overtimeMinutes: 5
     });
+  };
+
+  const createQuickGame = async (periods: number, periodMinutes: number, gameType: string) => {
+    if (!currentSeason || teams.length === 0) {
+      alert('Please create a team and season first');
+      return;
+    }
+
+    const now = new Date();
+    const gameDateTime = now.toISOString();
+    
+    const newGame: Game = {
+      id: crypto.randomUUID(),
+      homeTeamId: teams[0].id, // Use first available team
+      awayTeamName: `Opponent`,
+      date: gameDateTime,
+      status: 'planned',
+      seasonId: currentSeason.id,
+      periods,
+      periodMinutes,
+      hasOvertime: true,
+      homeScore: 0,
+      awayScore: 0
+    };
+
+    await dbHelpers.createGame(newGame);
+    loadData();
+    
+    // Show toast notification
+    const toast = document.createElement('div');
+    toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+    toast.textContent = `${gameType} game created!`;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+      document.body.removeChild(toast);
+    }, 2000);
   };
 
   const getTeamName = (teamId: string) => {
@@ -287,11 +343,45 @@ const Games: React.FC = () => {
         <h1 className="text-3xl font-bold">Games</h1>
         <button
           onClick={() => setIsCreateOpen(true)}
-          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded flex items-center space-x-2"
+          className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded flex items-center space-x-2"
         >
           <Plus className="w-4 h-4" />
-          <span>Create Game</span>
+          <span>Custom Game</span>
         </button>
+      </div>
+
+      {/* Quick Game Templates */}
+      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+        <div className="flex items-center space-x-2 mb-4">
+          <Zap className="w-5 h-5 text-blue-600" />
+          <h3 className="font-semibold text-lg">Quick Game</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <button
+            onClick={() => createQuickGame(2, 25, 'Senior Game')}
+            className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
+          >
+            <Play className="w-6 h-6" />
+            <span className="text-lg">Senior Game</span>
+            <span className="text-sm opacity-90">2 × 25 min</span>
+          </button>
+          <button
+            onClick={() => createQuickGame(2, 20, 'Junior Game')}
+            className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
+          >
+            <Clock className="w-6 h-6" />
+            <span className="text-lg">Junior Game</span>
+            <span className="text-sm opacity-90">2 × 20 min</span>
+          </button>
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
+          >
+            <Plus className="w-6 h-6" />
+            <span className="text-lg">Create Preset</span>
+            <span className="text-sm opacity-90">Custom settings</span>
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -561,6 +651,48 @@ const Games: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Team Side Selection Modal */}
+      {isSideSelectionOpen && selectedGameForStart && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-8 rounded-lg w-96">
+            <h3 className="text-xl font-semibold mb-6 text-center">Team Side Selection</h3>
+            <p className="text-center mb-8 text-gray-600">
+              Which side does <strong>{getTeamName(selectedGameForStart.homeTeamId)}</strong> defend first?
+            </p>
+            
+            {/* Rink diagram with side buttons */}
+            <div className="flex space-x-4 mb-6">
+              <button
+                onClick={() => handleSideSelection('left')}
+                className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-8 px-4 rounded-lg flex flex-col items-center space-y-2 transition-colors"
+              >
+                <ArrowLeft className="w-8 h-8" />
+                <span className="text-lg">← LEFT</span>
+              </button>
+              <button
+                onClick={() => handleSideSelection('right')}
+                className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-8 px-4 rounded-lg flex flex-col items-center space-y-2 transition-colors"
+              >
+                <ArrowRight className="w-8 h-8" />
+                <span className="text-lg">RIGHT →</span>
+              </button>
+            </div>
+            
+            <div className="flex justify-center">
+              <button
+                onClick={() => {
+                  setIsSideSelectionOpen(false);
+                  setSelectedGameForStart(null);
+                }}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

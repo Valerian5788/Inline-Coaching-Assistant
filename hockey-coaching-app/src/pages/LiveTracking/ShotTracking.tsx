@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../../stores/gameStore';
 import { 
@@ -7,7 +7,8 @@ import {
   Pause, 
   Target,
   RotateCcw,
-  X
+  X,
+  Undo
 } from 'lucide-react';
 import type { ShotResult, TeamSide } from '../../types';
 
@@ -20,23 +21,72 @@ const ShotTracking: React.FC = () => {
   const [showGoalAgainstPopup, setShowGoalAgainstPopup] = useState(false);
   const [clickPosition, setClickPosition] = useState({ x: 0, y: 0 });
   const [normalizedCoords, setNormalizedCoords] = useState({ x: 0, y: 0 });
-  const [teamSide, setTeamSide] = useState<TeamSide>('home'); // Which end we're defending
 
   const {
     currentGame,
     isTracking,
     isPaused,
     gameTime,
+    shots,
     pauseTracking,
     resumeTracking,
     addShot,
-    addGoalAgainst
+    addGoalAgainst,
+    undoLastShot
   } = useGameStore();
+
+  // Keyboard handler for undo
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() === 'z' && !showShotPopup && !showGoalAgainstPopup) {
+        handleUndo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [showShotPopup, showGoalAgainstPopup]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Calculate which side team is defending based on period and initialTeamSide
+  const getCurrentTeamSide = (): { defending: 'left' | 'right', teamSide: TeamSide } => {
+    if (!currentGame || !currentGame.initialTeamSide) {
+      return { defending: 'left', teamSide: 'home' };
+    }
+
+    const currentPeriod = currentGame.currentPeriod || 1;
+    
+    // Teams alternate sides each period
+    // Period 1: initial side, Period 2: opposite side, Period 3: initial side, etc.
+    const isOddPeriod = currentPeriod % 2 === 1;
+    const defending = isOddPeriod ? currentGame.initialTeamSide : (currentGame.initialTeamSide === 'left' ? 'right' : 'left');
+    
+    // For coordinate conversion: defending left = 'home', defending right = 'away'
+    const teamSide: TeamSide = defending === 'left' ? 'home' : 'away';
+    
+    return { defending, teamSide };
+  };
+
+  const handleUndo = async () => {
+    if (!currentGame || shots.length === 0) return;
+    
+    const success = await undoLastShot();
+    if (success) {
+      // Show toast notification
+      const toast = document.createElement('div');
+      toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+      toast.textContent = 'Shot removed';
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        document.body.removeChild(toast);
+      }, 2000);
+    }
   };
 
   const getCurrentPeriodTime = () => {
@@ -61,6 +111,9 @@ const ShotTracking: React.FC = () => {
     let normalizedX = relativeX / rect.width;
     let normalizedY = relativeY / rect.height;
 
+    // Get current team side (which end we're defending)
+    const { teamSide } = getCurrentTeamSide();
+    
     // Adjust coordinates based on team side (which end we're defending)
     // If defending the right side, flip the X coordinate so shots are always relative to attacking zone
     if (teamSide === 'away') {
@@ -72,7 +125,7 @@ const ShotTracking: React.FC = () => {
     normalizedY = Math.max(0, Math.min(1, normalizedY));
 
     return { x: normalizedX, y: normalizedY };
-  }, [teamSide]);
+  }, [currentGame]);
 
   const handleRinkClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (showShotPopup || showGoalAgainstPopup) return;
@@ -102,6 +155,8 @@ const ShotTracking: React.FC = () => {
 
   const handleShotResult = async (result: ShotResult) => {
     if (!currentGame) return;
+
+    const { teamSide } = getCurrentTeamSide();
 
     await addShot({
       period: currentGame.currentPeriod || 1,
@@ -200,34 +255,32 @@ const ShotTracking: React.FC = () => {
           </button>
         </div>
 
-        {/* Team side selector */}
+        {/* Team side indicator */}
         <div className="absolute bottom-4 left-4 pointer-events-auto">
           <div className="bg-black bg-opacity-50 text-white p-3 rounded-lg">
-            <div className="text-sm mb-2">Defending:</div>
-            <div className="flex space-x-2">
-              <button
-                onClick={() => setTeamSide('home')}
-                className={`px-3 py-1 text-sm rounded ${
-                  teamSide === 'home' 
-                    ? 'bg-blue-500' 
-                    : 'bg-gray-600 hover:bg-gray-500'
-                }`}
-              >
-                Left Side
-              </button>
-              <button
-                onClick={() => setTeamSide('away')}
-                className={`px-3 py-1 text-sm rounded ${
-                  teamSide === 'away' 
-                    ? 'bg-red-500' 
-                    : 'bg-gray-600 hover:bg-gray-500'
-                }`}
-              >
-                Right Side
-              </button>
+            <div className="text-sm mb-1">Defending:</div>
+            <div className={`px-3 py-1 text-sm rounded font-medium ${
+              getCurrentTeamSide().defending === 'left' 
+                ? 'bg-blue-500' 
+                : 'bg-red-500'
+            }`}>
+              {getCurrentTeamSide().defending.toUpperCase()}
             </div>
           </div>
         </div>
+
+        {/* Undo button - only show if there are shots */}
+        {shots.length > 0 && (
+          <div className="absolute bottom-24 left-4 pointer-events-auto">
+            <button
+              onClick={handleUndo}
+              className="bg-orange-500 hover:bg-orange-600 text-white p-3 rounded-full shadow-lg transition-colors"
+              title="Undo last shot (Z key)"
+            >
+              <Undo className="w-6 h-6" />
+            </button>
+          </div>
+        )}
 
         {/* Instructions */}
         <div className="absolute bottom-4 right-4 pointer-events-auto">

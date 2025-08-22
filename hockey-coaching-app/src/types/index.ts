@@ -32,6 +32,7 @@ export interface Season {
 
 export type GameStatus = 'planned' | 'live' | 'archived';
 export type TeamSide = 'home' | 'away';
+export type RinkSide = 'left' | 'right';
 
 export interface Game {
   id: string;
@@ -48,6 +49,8 @@ export interface Game {
   homeScore?: number;
   awayScore?: number;
   teamSide?: TeamSide; // Which side our team defends in current period
+  initialTeamSide?: RinkSide; // Which side of rink team defends first period
+  timeoutUsed?: boolean; // Whether timeout has been used
 }
 
 export type ShotResult = 'goal' | 'save' | 'miss' | 'blocked';
@@ -73,7 +76,7 @@ export interface GoalAgainst {
   reason?: string;
 }
 
-export type GameEventType = 'period_start' | 'period_end' | 'goal_home' | 'goal_away' | 'timeout' | 'penalty' | 'game_start' | 'game_end';
+export type GameEventType = 'period_start' | 'period_end' | 'goal_home' | 'goal_away' | 'timeout' | 'penalty' | 'game_start' | 'game_end' | 'faceoff_won' | 'faceoff_lost';
 
 export interface GameEvent {
   id: string;

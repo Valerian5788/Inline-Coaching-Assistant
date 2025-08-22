@@ -13,7 +13,10 @@ import {
   BarChart3,
   Clock,
   Home,
-  Timer
+  Timer,
+  PauseCircle,
+  CheckCircle,
+  TrendingUp
 } from 'lucide-react';
 import { dbHelpers } from '../db';
 
@@ -27,6 +30,7 @@ const LiveTracking: React.FC = () => {
     isTracking, 
     isPaused, 
     gameTime,
+    events,
     startTracking, 
     pauseTracking, 
     resumeTracking,
@@ -36,7 +40,10 @@ const LiveTracking: React.FC = () => {
     endPeriod,
     endGame,
     addHomeGoal,
-    addAwayGoal
+    addAwayGoal,
+    useTimeout,
+    addFaceoffWin,
+    addFaceoffLoss
   } = useGameStore();
 
   useEffect(() => {
@@ -127,6 +134,31 @@ const LiveTracking: React.FC = () => {
     }
   }, [currentGame.homeTeamId]);
 
+  // Calculate current period faceoff stats
+  const getCurrentPeriodFaceoffs = () => {
+    if (!currentGame) return { wins: 0, losses: 0, percentage: 0 };
+    
+    const currentPeriod = currentGame.currentPeriod || 1;
+    const periodFaceoffs = events.filter(event => 
+      event.period === currentPeriod && 
+      (event.type === 'faceoff_won' || event.type === 'faceoff_lost')
+    );
+    
+    const wins = periodFaceoffs.filter(event => event.type === 'faceoff_won').length;
+    const losses = periodFaceoffs.filter(event => event.type === 'faceoff_lost').length;
+    const total = wins + losses;
+    const percentage = total > 0 ? (wins / total) * 100 : 0;
+    
+    return { wins, losses, percentage, total };
+  };
+
+  const handleTimeout = async () => {
+    if (!currentGame || currentGame.timeoutUsed) return;
+    await useTimeout();
+  };
+
+  const faceoffStats = getCurrentPeriodFaceoffs();
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       {/* Header */}
@@ -210,7 +242,7 @@ const LiveTracking: React.FC = () => {
           <span>Time Controls</span>
         </h3>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
           {/* Play/Pause Button */}
           <button
             onClick={handlePlayPause}
@@ -229,6 +261,29 @@ const LiveTracking: React.FC = () => {
               <>
                 <Play className="w-6 h-6" />
                 <span>Play</span>
+              </>
+            )}
+          </button>
+
+          {/* Timeout Button */}
+          <button
+            onClick={handleTimeout}
+            disabled={currentGame?.timeoutUsed}
+            className={`h-16 rounded-lg font-bold text-white flex items-center justify-center space-x-2 ${
+              currentGame?.timeoutUsed
+                ? 'bg-gray-400 cursor-not-allowed'
+                : 'bg-yellow-500 hover:bg-yellow-600'
+            }`}
+          >
+            {currentGame?.timeoutUsed ? (
+              <>
+                <CheckCircle className="w-6 h-6" />
+                <span className="text-sm">Used ✓</span>
+              </>
+            ) : (
+              <>
+                <PauseCircle className="w-6 h-6" />
+                <span>Timeout</span>
               </>
             )}
           </button>
@@ -284,6 +339,44 @@ const LiveTracking: React.FC = () => {
           >
             <Square className="w-5 h-5" />
             <span>End Game</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Faceoff Counter */}
+      <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2">
+          <TrendingUp className="w-5 h-5" />
+          <span>Faceoffs This Period</span>
+        </h3>
+        
+        <div className="grid grid-cols-3 gap-4 items-center">
+          {/* Win Button */}
+          <button
+            onClick={addFaceoffWin}
+            className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-4 rounded-lg flex items-center justify-center space-x-2 text-lg"
+          >
+            <Plus className="w-6 h-6" />
+            <span>WIN</span>
+          </button>
+
+          {/* Stats Display */}
+          <div className="text-center">
+            <div className="text-3xl font-bold text-gray-900 mb-1">
+              {faceoffStats.wins}-{faceoffStats.losses}
+            </div>
+            <div className="text-lg font-semibold text-blue-600">
+              {faceoffStats.percentage.toFixed(0)}% won
+            </div>
+          </div>
+
+          {/* Loss Button */}
+          <button
+            onClick={addFaceoffLoss}
+            className="bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-4 rounded-lg flex items-center justify-center space-x-2 text-lg"
+          >
+            <Plus className="w-6 h-6" />
+            <span>LOSS</span>
           </button>
         </div>
       </div>
