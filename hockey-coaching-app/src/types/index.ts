@@ -102,3 +102,41 @@ export interface AppState {
   selectedTeam: Team | null;
   currentSeason: Season | null;
 }
+
+// Data Analysis Types
+export type RinkZone = 'high_slot' | 'low_slot' | 'left_circle' | 'right_circle' | 'left_point' | 'right_point' | 'left_wing' | 'right_wing' | 'center_point';
+
+export interface AnalysisFilters {
+  seasonId?: string;
+  teamId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  gameIds?: string[];
+}
+
+export interface ZoneStats {
+  zone: RinkZone;
+  shots: number;
+  goals: number;
+  saves: number;
+  misses: number;
+  percentage: number;
+}
+
+export interface ShotWithGame extends Shot {
+  gameDate: string;
+  homeTeamId: string;
+  awayTeamName: string;
+  seasonId: string;
+}
+
+export interface GameStats {
+  totalShots: number;
+  totalGoals: number;
+  totalSaves: number;
+  totalMisses: number;
+  totalBlocked: number;
+  shotsPerGame: number;
+  goalPercentage: number;
+  savePercentage: number;
+}
