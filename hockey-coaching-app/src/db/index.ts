@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Team, Player, Season, Game, Shot, GoalAgainst, GameEvent } from '../types';
+import type { Team, Player, Season, Game, Shot, GoalAgainst, GameEvent, Drill, PracticePlan } from '../types';
 
 export class HockeyDB extends Dexie {
   teams!: Table<Team>;
@@ -9,6 +9,8 @@ export class HockeyDB extends Dexie {
   shots!: Table<Shot>;
   goalsAgainst!: Table<GoalAgainst>;
   gameEvents!: Table<GameEvent>;
+  drills!: Table<Drill>;
+  practicePlans!: Table<PracticePlan>;
 
   constructor() {
     super('HockeyCoachingDB');
@@ -20,7 +22,9 @@ export class HockeyDB extends Dexie {
       games: 'id, seasonId, homeTeamId, date, status',
       shots: 'id, gameId, period, timestamp, result, teamSide',
       goalsAgainst: 'id, gameId, period, timestamp',
-      gameEvents: 'id, gameId, type, period, gameTime, timestamp'
+      gameEvents: 'id, gameId, type, period, gameTime, timestamp',
+      drills: 'id, name, category, createdAt, updatedAt',
+      practicePlans: 'id, name, date, createdAt, updatedAt'
     });
   }
 }
@@ -219,5 +223,62 @@ export const dbHelpers = {
 
   async deleteGameEventsByGame(gameId: string): Promise<void> {
     await db.gameEvents.where('gameId').equals(gameId).delete();
+  },
+
+  // Drills
+  async getAllDrills(): Promise<Drill[]> {
+    const drills = await db.drills.toArray();
+    return drills.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  },
+
+  async getDrillById(id: string): Promise<Drill | undefined> {
+    return await db.drills.get(id);
+  },
+
+  async getDrillsByCategory(category: string): Promise<Drill[]> {
+    if (category === 'All') return this.getAllDrills();
+    return await db.drills.where('category').equals(category).toArray();
+  },
+
+  async createDrill(drill: Drill): Promise<string> {
+    return await db.drills.add(drill);
+  },
+
+  async updateDrill(id: string, changes: Partial<Drill>): Promise<number> {
+    const updateData = {
+      ...changes,
+      updatedAt: new Date().toISOString()
+    };
+    return await db.drills.update(id, updateData);
+  },
+
+  async deleteDrill(id: string): Promise<void> {
+    await db.drills.delete(id);
+  },
+
+  // Practice Plans
+  async getAllPracticePlans(): Promise<PracticePlan[]> {
+    const plans = await db.practicePlans.toArray();
+    return plans.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  },
+
+  async getPracticePlanById(id: string): Promise<PracticePlan | undefined> {
+    return await db.practicePlans.get(id);
+  },
+
+  async createPracticePlan(plan: PracticePlan): Promise<string> {
+    return await db.practicePlans.add(plan);
+  },
+
+  async updatePracticePlan(id: string, changes: Partial<PracticePlan>): Promise<number> {
+    const updateData = {
+      ...changes,
+      updatedAt: new Date().toISOString()
+    };
+    return await db.practicePlans.update(id, updateData);
+  },
+
+  async deletePracticePlan(id: string): Promise<void> {
+    await db.practicePlans.delete(id);
   }
 };

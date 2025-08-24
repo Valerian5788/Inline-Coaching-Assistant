@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Users, Calendar, Play, Trophy, BarChart3 } from 'lucide-react';
+import { Home, Users, Calendar, Play, Trophy, BarChart3, Target } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -15,6 +15,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { path: '/seasons', icon: Trophy, label: 'Seasons' },
     { path: '/games', icon: Calendar, label: 'Games' },
     { path: '/live', icon: Play, label: 'Live Tracking' },
+    { path: '/training', icon: Target, label: 'Training' },
     { path: '/analysis', icon: BarChart3, label: 'Analysis' }
   ];
 

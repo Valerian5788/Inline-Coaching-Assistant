@@ -143,3 +143,38 @@ export interface GameStats {
   goalPercentage: number;
   savePercentage: number;
 }
+
+// Training/Drill Types
+export type DrillCategory = 'Shooting' | 'Passing' | 'Defense' | 'Skating' | 'Other';
+
+export interface DrillElement {
+  type: 'arrow' | 'circle' | 'x';
+  id: string;
+  from?: { x: number; y: number };
+  to?: { x: number; y: number };
+  center?: { x: number; y: number };
+  position?: { x: number; y: number };
+  label?: string;
+  color?: string;
+}
+
+export interface Drill {
+  id: string;
+  name: string;
+  category: DrillCategory;
+  elements: DrillElement[];
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PracticePlan {
+  id: string;
+  name: string;
+  date: string;
+  drillIds: string[];
+  notes: string;
+  duration: number; // in minutes
+  createdAt: string;
+  updatedAt: string;
+}
