@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Season, SeasonType, SeasonStatus } from '../types';
 import { dbHelpers } from '../db';
 import { useAppStore } from '../stores/appStore';
 import { Calendar, Trophy, Play, Archive, Edit2, Trash2, Plus, Crown } from 'lucide-react';
 
 const Seasons: React.FC = () => {
-  const [seasons, setSeasons] = useState<Array<Season & { gameCount: number }>>([]);
+  const navigate = useNavigate();
+  const [seasons, setSeasons] = useState<Array<Season & { gameCount: number; playedCount: number; upcomingCount: number }>>([]);
+  const [loading, setLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingSeason, setEditingSeason] = useState<Season | null>(null);
@@ -27,7 +30,23 @@ const Seasons: React.FC = () => {
 
   const loadSeasons = async () => {
     const allSeasons = await dbHelpers.getSeasonsWithGameCounts();
-    setSeasons(allSeasons);
+    const allGames = await dbHelpers.getAllGames();
+    
+    // Calculate played vs upcoming games for each season
+    const seasonsWithBreakdown = allSeasons.map(season => {
+      const seasonGames = allGames.filter(game => game.seasonId === season.id);
+      const playedCount = seasonGames.filter(game => game.status === 'archived').length;
+      const upcomingCount = seasonGames.filter(game => game.status === 'planned').length;
+      
+      return {
+        ...season,
+        playedCount,
+        upcomingCount
+      };
+    });
+    
+    setSeasons(seasonsWithBreakdown);
+    setLoading(false);
   };
 
   const handleCreateSeason = async (e: React.FormEvent) => {
@@ -69,7 +88,11 @@ const Seasons: React.FC = () => {
   };
 
   const handleDeleteSeason = async (seasonId: string) => {
-    if (confirm('Are you sure you want to delete this season? This will also delete all associated games.')) {
+    const season = seasons.find(s => s.id === seasonId);
+    const seasonName = season ? season.name : 'this season';
+    const gameCount = season ? season.gameCount : 0;
+    
+    if (confirm(`Delete season "${seasonName}"?\n\nThis will permanently delete:\n• The season\n• ${gameCount} game${gameCount !== 1 ? 's' : ''}\n• All shots, events, and statistics`)) {
       await dbHelpers.deleteSeason(seasonId);
       loadSeasons();
     }
@@ -141,6 +164,21 @@ const Seasons: React.FC = () => {
     });
   };
 
+  const handleSeasonClick = (seasonId: string) => {
+    navigate(`/games?season=${seasonId}`);
+  };
+
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex flex-col items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
+          <div className="text-lg text-gray-600">Loading seasons...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
@@ -159,10 +197,11 @@ const Seasons: React.FC = () => {
         {seasons.map((season) => (
           <div
             key={season.id}
-            className={`bg-white rounded-lg shadow-md p-6 border transition-all ${
+            onClick={() => handleSeasonClick(season.id)}
+            className={`bg-white rounded-lg shadow-md p-6 border transition-all cursor-pointer ${
               season.status === 'active' 
-                ? 'border-green-500 shadow-lg ring-2 ring-green-100' 
-                : 'border-gray-200 hover:border-gray-300'
+                ? 'border-green-500 shadow-lg ring-2 ring-green-100 hover:ring-green-200' 
+                : 'border-gray-200 hover:border-blue-300 hover:shadow-lg'
             }`}
           >
             {/* Header */}
@@ -188,13 +227,19 @@ const Seasons: React.FC = () => {
               </div>
               <div className="flex space-x-1">
                 <button
-                  onClick={() => openEditModal(season)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditModal(season);
+                  }}
                   className="p-1 text-gray-400 hover:text-blue-600"
                 >
                   <Edit2 className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => handleDeleteSeason(season.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteSeason(season.id);
+                  }}
                   className="p-1 text-gray-400 hover:text-red-600"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -213,17 +258,24 @@ const Seasons: React.FC = () => {
             )}
 
             {/* Stats */}
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-500">
-                {season.gameCount} game{season.gameCount !== 1 ? 's' : ''}
-              </span>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-500">
+                  {season.playedCount} games played, {season.upcomingCount} upcoming
+                </span>
+              </div>
               {season.status !== 'active' && (
-                <button
-                  onClick={() => handleSetActive(season)}
-                  className="text-blue-600 hover:text-blue-800 font-medium"
-                >
-                  Set Active
-                </button>
+                <div className="flex justify-end">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSetActive(season);
+                    }}
+                    className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                  >
+                    Set Active
+                  </button>
+                </div>
               )}
             </div>
           </div>

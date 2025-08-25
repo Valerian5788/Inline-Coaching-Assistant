@@ -115,7 +115,8 @@ const DataAnalysis: React.FC = () => {
   if (loading && filteredShots.length === 0) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
           <div className="text-lg text-gray-600">Loading analysis data...</div>
         </div>
       </div>

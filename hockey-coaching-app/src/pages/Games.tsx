@@ -16,7 +16,9 @@ import {
   Trash2,
   ArrowLeft,
   ArrowRight,
-  Zap
+  Zap,
+  Edit,
+  X
 } from 'lucide-react';
 
 const Games: React.FC = () => {
@@ -28,6 +30,12 @@ const Games: React.FC = () => {
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
   const [isSideSelectionOpen, setIsSideSelectionOpen] = useState(false);
   const [selectedGameForStart, setSelectedGameForStart] = useState<Game | null>(null);
+  const [showPresetModal, setShowPresetModal] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState<{periods: number, minutes: number, name: string} | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedGameForEdit, setSelectedGameForEdit] = useState<Game | null>(null);
+  const [seasonFilter, setSeasonFilter] = useState<string>('');
+  const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
     team: '',
     season: '',
@@ -48,11 +56,25 @@ const Games: React.FC = () => {
     overtimeMinutes: 5
   });
 
+  const [presetForm, setPresetForm] = useState({
+    awayTeamName: '',
+    date: '',
+    time: '',
+    seasonId: ''
+  });
+
   const { currentSeason } = useAppStore();
   const { initializeLiveGame } = useGameStore();
 
   useEffect(() => {
     loadData();
+    // Check for season filter from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const seasonParam = urlParams.get('season');
+    if (seasonParam) {
+      setSeasonFilter(seasonParam);
+      setFilters(prev => ({ ...prev, season: seasonParam }));
+    }
   }, []);
 
   useEffect(() => {
@@ -60,19 +82,30 @@ const Games: React.FC = () => {
   }, [games, filters]);
 
   const loadData = async () => {
-    const [allGames, allTeams, allSeasons] = await Promise.all([
-      dbHelpers.getAllGames(),
-      dbHelpers.getAllTeams(), 
-      dbHelpers.getAllSeasons()
-    ]);
-    
-    setGames(allGames);
-    setTeams(allTeams);
-    setSeasons(allSeasons);
-    
-    // Set default season to active season
-    if (currentSeason) {
-      setGameForm(prev => ({ ...prev, seasonId: currentSeason.id }));
+    try {
+      const [allGames, allTeams, allSeasons] = await Promise.all([
+        dbHelpers.getAllGames(),
+        dbHelpers.getAllTeams(), 
+        dbHelpers.getAllSeasons()
+      ]);
+      
+      setGames(allGames);
+      setTeams(allTeams);
+      setSeasons(allSeasons);
+      
+      // Set default season to active season
+      if (currentSeason) {
+        setGameForm(prev => ({ ...prev, seasonId: currentSeason.id }));
+        setPresetForm(prev => ({ ...prev, seasonId: currentSeason.id }));
+      }
+      
+      // Set default date/time to now
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const timeStr = now.toTimeString().slice(0, 5);
+      setPresetForm(prev => ({ ...prev, date: dateStr, time: timeStr }));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -153,7 +186,10 @@ const Games: React.FC = () => {
   };
 
   const handleDeleteGame = async (gameId: string) => {
-    if (confirm('Are you sure you want to delete this game? This will also delete all associated data.')) {
+    const game = games.find(g => g.id === gameId);
+    const gameName = game ? `${getTeamName(game.homeTeamId)} vs ${game.awayTeamName}` : 'this game';
+    
+    if (confirm(`Delete game "${gameName}"?\n\nThis will permanently delete the game and all its data (shots, events, etc.).`)) {
       await dbHelpers.deleteGame(gameId);
       loadData();
     }
@@ -173,41 +209,108 @@ const Games: React.FC = () => {
     });
   };
 
-  const createQuickGame = async (periods: number, periodMinutes: number, gameType: string) => {
+
+  const openPresetModal = (periods: number, minutes: number, name: string) => {
+    setSelectedPreset({ periods, minutes, name });
+    setShowPresetModal(true);
+  };
+
+  const createGameFromPreset = async () => {
+    if (!selectedPreset || !presetForm.awayTeamName.trim()) {
+      alert('Please enter opponent name');
+      return;
+    }
+
     if (!currentSeason || teams.length === 0) {
       alert('Please create a team and season first');
       return;
     }
 
-    const now = new Date();
-    const gameDateTime = now.toISOString();
+    const gameDateTime = new Date(`${presetForm.date}T${presetForm.time}`).toISOString();
     
     const newGame: Game = {
       id: crypto.randomUUID(),
       homeTeamId: teams[0].id, // Use first available team
-      awayTeamName: `Opponent`,
+      awayTeamName: presetForm.awayTeamName.trim(),
       date: gameDateTime,
       status: 'planned',
-      seasonId: currentSeason.id,
-      periods,
-      periodMinutes,
-      hasOvertime: true,
+      seasonId: presetForm.seasonId || currentSeason.id,
+      periods: selectedPreset.periods,
+      periodMinutes: selectedPreset.minutes,
+      hasOvertime: selectedPreset.name === 'Senior Game',
       homeScore: 0,
       awayScore: 0
     };
 
     await dbHelpers.createGame(newGame);
     loadData();
+    setShowPresetModal(false);
+    setPresetForm({ awayTeamName: '', date: presetForm.date, time: presetForm.time, seasonId: presetForm.seasonId });
     
     // Show toast notification
     const toast = document.createElement('div');
     toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
-    toast.textContent = `${gameType} game created!`;
+    toast.textContent = `${selectedPreset.name} created!`;
     document.body.appendChild(toast);
-    
     setTimeout(() => {
       document.body.removeChild(toast);
     }, 2000);
+  };
+
+  const openEditModal = (game: Game) => {
+    setSelectedGameForEdit(game);
+    setGameForm({
+      homeTeamId: game.homeTeamId,
+      awayTeamName: game.awayTeamName,
+      date: new Date(game.date).toISOString().split('T')[0],
+      time: new Date(game.date).toTimeString().slice(0, 5),
+      seasonId: game.seasonId,
+      periods: game.periods,
+      periodMinutes: game.periodMinutes,
+      hasOvertime: game.hasOvertime || false,
+      overtimeMinutes: 5
+    });
+    setShowEditModal(true);
+  };
+
+  const updateGame = async () => {
+    if (!selectedGameForEdit) return;
+
+    const gameDateTime = new Date(`${gameForm.date}T${gameForm.time}`).toISOString();
+    
+    const updatedGame: Game = {
+      ...selectedGameForEdit,
+      homeTeamId: gameForm.homeTeamId,
+      awayTeamName: gameForm.awayTeamName,
+      date: gameDateTime,
+      seasonId: gameForm.seasonId,
+      periods: gameForm.periods,
+      periodMinutes: gameForm.periodMinutes,
+      hasOvertime: gameForm.hasOvertime
+    };
+
+    await dbHelpers.updateGame(selectedGameForEdit.id, updatedGame);
+    loadData();
+    setShowEditModal(false);
+    resetForm();
+    
+    // Show toast notification
+    const toast = document.createElement('div');
+    toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+    toast.textContent = 'Game updated!';
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      document.body.removeChild(toast);
+    }, 2000);
+  };
+
+  const clearSeasonFilter = () => {
+    setSeasonFilter('');
+    setFilters(prev => ({ ...prev, season: '' }));
+    // Update URL
+    const url = new URL(window.location.href);
+    url.searchParams.delete('season');
+    window.history.replaceState({}, '', url);
   };
 
   const getTeamName = (teamId: string) => {
@@ -283,6 +386,15 @@ const Games: React.FC = () => {
             </h3>
           </div>
           <div className="flex space-x-1">
+            {game.status === 'planned' && (
+              <button
+                onClick={() => openEditModal(game)}
+                className="p-1 text-gray-400 hover:text-blue-600"
+                title="Edit game"
+              >
+                <Edit className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={() => handleDeleteGame(game.id)}
               className="p-1 text-gray-400 hover:text-red-600"
@@ -336,6 +448,17 @@ const Games: React.FC = () => {
     );
   };
 
+  if (loading) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex flex-col items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
+          <div className="text-lg text-gray-600">Loading games...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto px-4 py-8">
       {/* Header */}
@@ -358,7 +481,7 @@ const Games: React.FC = () => {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <button
-            onClick={() => createQuickGame(2, 25, 'Senior Game')}
+            onClick={() => openPresetModal(2, 25, 'Senior Game')}
             className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
           >
             <Play className="w-6 h-6" />
@@ -366,7 +489,7 @@ const Games: React.FC = () => {
             <span className="text-sm opacity-90">2 × 25 min</span>
           </button>
           <button
-            onClick={() => createQuickGame(2, 20, 'Junior Game')}
+            onClick={() => openPresetModal(2, 20, 'Junior Game')}
             className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
           >
             <Clock className="w-6 h-6" />
@@ -378,8 +501,8 @@ const Games: React.FC = () => {
             className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
           >
             <Plus className="w-6 h-6" />
-            <span className="text-lg">Create Preset</span>
-            <span className="text-sm opacity-90">Custom settings</span>
+            <span className="text-lg">Custom Game</span>
+            <span className="text-sm opacity-90">Full settings</span>
           </button>
         </div>
       </div>
@@ -458,6 +581,27 @@ const Games: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Season Filter Banner */}
+      {seasonFilter && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Filter className="w-5 h-5 text-blue-600" />
+              <span className="font-medium text-blue-800">
+                Viewing: {seasons.find(s => s.id === seasonFilter)?.name || 'Unknown Season'}
+              </span>
+            </div>
+            <button
+              onClick={clearSeasonFilter}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm flex items-center space-x-1"
+            >
+              <X className="w-4 h-4" />
+              <span>Clear Filter</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Games by Status */}
       <div className="space-y-8">
@@ -651,6 +795,199 @@ const Games: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Preset Game Modal */}
+      {showPresetModal && selectedPreset && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4">{selectedPreset.name}</h2>
+            <p className="text-gray-600 mb-4">
+              {selectedPreset.periods} periods × {selectedPreset.minutes} minutes
+            </p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Opponent Name *</label>
+                <input
+                  type="text"
+                  value={presetForm.awayTeamName}
+                  onChange={(e) => setPresetForm({ ...presetForm, awayTeamName: e.target.value })}
+                  className="w-full p-3 border rounded-lg text-lg"
+                  placeholder="Enter opponent name"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">Date</label>
+                <input
+                  type="date"
+                  value={presetForm.date}
+                  onChange={(e) => setPresetForm({ ...presetForm, date: e.target.value })}
+                  className="w-full p-3 border rounded-lg"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">Time</label>
+                <input
+                  type="time"
+                  value={presetForm.time}
+                  onChange={(e) => setPresetForm({ ...presetForm, time: e.target.value })}
+                  className="w-full p-3 border rounded-lg"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">Season</label>
+                <select
+                  value={presetForm.seasonId}
+                  onChange={(e) => setPresetForm({ ...presetForm, seasonId: e.target.value })}
+                  className="w-full p-3 border rounded-lg"
+                >
+                  {seasons.map(season => (
+                    <option key={season.id} value={season.id}>{season.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            <div className="flex space-x-3 mt-6">
+              <button
+                onClick={createGameFromPreset}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg"
+              >
+                Create Game
+              </button>
+              <button
+                onClick={() => setShowPresetModal(false)}
+                className="px-4 py-3 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Game Modal */}
+      {showEditModal && selectedGameForEdit && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-screen overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">Edit Game</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Home Team</label>
+                <select
+                  value={gameForm.homeTeamId}
+                  onChange={(e) => setGameForm({ ...gameForm, homeTeamId: e.target.value })}
+                  className="w-full p-3 border rounded-lg"
+                >
+                  {teams.map(team => (
+                    <option key={team.id} value={team.id}>{team.name}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">Away Team</label>
+                <input
+                  type="text"
+                  value={gameForm.awayTeamName}
+                  onChange={(e) => setGameForm({ ...gameForm, awayTeamName: e.target.value })}
+                  className="w-full p-3 border rounded-lg"
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Date</label>
+                  <input
+                    type="date"
+                    value={gameForm.date}
+                    onChange={(e) => setGameForm({ ...gameForm, date: e.target.value })}
+                    className="w-full p-3 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Time</label>
+                  <input
+                    type="time"
+                    value={gameForm.time}
+                    onChange={(e) => setGameForm({ ...gameForm, time: e.target.value })}
+                    className="w-full p-3 border rounded-lg"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">Season</label>
+                <select
+                  value={gameForm.seasonId}
+                  onChange={(e) => setGameForm({ ...gameForm, seasonId: e.target.value })}
+                  className="w-full p-3 border rounded-lg"
+                >
+                  {seasons.map(season => (
+                    <option key={season.id} value={season.id}>{season.name}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Periods</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={gameForm.periods}
+                    onChange={(e) => setGameForm({ ...gameForm, periods: parseInt(e.target.value) || 1 })}
+                    className="w-full p-3 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Period Minutes</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={gameForm.periodMinutes}
+                    onChange={(e) => setGameForm({ ...gameForm, periodMinutes: parseInt(e.target.value) || 1 })}
+                    className="w-full p-3 border rounded-lg"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={gameForm.hasOvertime}
+                    onChange={(e) => setGameForm({ ...gameForm, hasOvertime: e.target.checked })}
+                    className="rounded"
+                  />
+                  <span className="text-sm font-medium">Has Overtime</span>
+                </label>
+              </div>
+            </div>
+            
+            <div className="flex space-x-3 mt-6">
+              <button
+                onClick={updateGame}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg"
+              >
+                Save Changes
+              </button>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="px-4 py-3 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
