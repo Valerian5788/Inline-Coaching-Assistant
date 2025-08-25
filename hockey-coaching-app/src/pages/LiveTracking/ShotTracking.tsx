@@ -200,6 +200,7 @@ const ShotTracking: React.FC = () => {
     // Auto-pause on goal or save
     if (result === 'goal' || result === 'save') {
       pauseTracking();
+      setShowFaceoffButtons(true); // Show faceoff ribbon after auto-pause
     }
 
     setShowShotPopup(false);
@@ -218,6 +219,10 @@ const ShotTracking: React.FC = () => {
     // Double tap = goal against us, so increment away team score
     const gameStore = useGameStore.getState();
     await gameStore.addAwayGoal();
+
+    // Auto-pause and show faceoff ribbon after goal against
+    pauseTracking();
+    setShowFaceoffButtons(true);
 
     setShowGoalAgainstPopup(false);
   };
