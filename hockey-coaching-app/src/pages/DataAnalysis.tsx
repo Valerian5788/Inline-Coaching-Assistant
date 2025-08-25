@@ -89,6 +89,8 @@ const DataAnalysis: React.FC = () => {
 
     const left = shot.x * 100; // Convert to percentage
     const top = shot.y * 100; // Convert to percentage
+    
+    console.log('DataAnalysis displaying shot:', {x: shot.x, y: shot.y, result: shot.result});
 
     return {
       left: `${Math.max(0, Math.min(100, left))}%`,

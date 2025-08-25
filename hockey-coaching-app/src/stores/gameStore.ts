@@ -193,16 +193,17 @@ export const useGameStore = create<GameStore>()(
         await dbHelpers.updateGame(game.id, { status: 'live', currentPeriod: 1, homeScore: 0, awayScore: 0 });
         const updatedGame = { ...game, status: 'live' as const, currentPeriod: 1, homeScore: 0, awayScore: 0 };
         
-        // Load game data and start tracking
+        // Load game data but don't start timer automatically
         await get().loadGameData(game.id);
         set({ 
           currentGame: updatedGame,
-          gameTime: 0
+          gameTime: 0,
+          isTracking: false,
+          isPaused: true
         });
         
-        // Add game start event
+        // Add game start event but don't auto-start timer
         await get().addGameEvent('game_start', 'Game started');
-        await get().startPeriod(1);
       },
 
       updateGameStatus: async (gameId, status) => {
@@ -260,8 +261,7 @@ export const useGameStore = create<GameStore>()(
         // Add period start event
         await get().addGameEvent('period_start', `Period ${period} started`);
         
-        // Start or resume tracking
-        get().startTracking();
+        // Don't auto-start tracking - let coach press play button
         
         set(state => ({
           currentGame: { ...state.currentGame!, currentPeriod: period }

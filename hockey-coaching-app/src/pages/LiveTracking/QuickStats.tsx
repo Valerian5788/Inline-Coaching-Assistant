@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../../stores/gameStore';
-import { dbHelpers } from '../../db';
 import { ArrowLeft, Target, Percent } from 'lucide-react';
-import type { Shot, GoalAgainst, GameEvent } from '../../types';
+import type { Shot, GoalAgainst } from '../../types';
 
 const QuickStats: React.FC = () => {
   const navigate = useNavigate();
@@ -78,24 +77,27 @@ const QuickStats: React.FC = () => {
         </div>
 
         {/* Our shots (blue dots, goals are larger) */}
-        {currentPeriodShots.map((shot, index) => (
-          <div
-            key={shot.id}
-            className={`absolute rounded-full ${
-              shot.result === 'goal' 
-                ? 'w-4 h-4 bg-blue-600' 
-                : 'w-2 h-2 bg-blue-400'
-            }`}
-            style={{
-              left: `${shot.x * 290 + 5}px`,
-              top: `${shot.y * 140 + 5}px`,
-              transform: 'translate(-50%, -50%)'
-            }}
-          />
-        ))}
+        {currentPeriodShots.map((shot) => {
+          console.log('QuickStats displaying shot:', {x: shot.x, y: shot.y, result: shot.result});
+          return (
+            <div
+              key={shot.id}
+              className={`absolute rounded-full ${
+                shot.result === 'goal' 
+                  ? 'w-4 h-4 bg-blue-600' 
+                  : 'w-2 h-2 bg-blue-400'
+              }`}
+              style={{
+                left: `${shot.x * 290 + 5}px`,
+                top: `${shot.y * 140 + 5}px`,
+                transform: 'translate(-50%, -50%)'
+              }}
+            />
+          );
+        })}
 
         {/* Their goals (red X marks) */}
-        {currentPeriodGoalsAgainst.map((goal, index) => (
+        {currentPeriodGoalsAgainst.map((goal) => (
           <div
             key={goal.id}
             className="absolute text-red-600 font-bold text-lg"

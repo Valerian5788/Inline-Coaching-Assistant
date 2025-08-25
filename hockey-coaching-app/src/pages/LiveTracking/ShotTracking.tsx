@@ -28,6 +28,7 @@ const ShotTracking: React.FC = () => {
     isPaused,
     gameTime,
     shots,
+    startTracking,
     pauseTracking,
     resumeTracking,
     addShot,
@@ -51,6 +52,16 @@ const ShotTracking: React.FC = () => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handlePlayPause = () => {
+    if (isTracking && !isPaused) {
+      pauseTracking();
+    } else if (isTracking && isPaused) {
+      resumeTracking();
+    } else {
+      startTracking();
+    }
   };
 
   // Calculate which side team is defending based on period and initialTeamSide
@@ -111,18 +122,11 @@ const ShotTracking: React.FC = () => {
     let normalizedX = relativeX / rect.width;
     let normalizedY = relativeY / rect.height;
 
-    // Get current team side (which end we're defending)
-    const { teamSide } = getCurrentTeamSide();
-    
-    // Adjust coordinates based on team side (which end we're defending)
-    // If defending the right side, flip the X coordinate so shots are always relative to attacking zone
-    if (teamSide === 'away') {
-      normalizedX = 1 - normalizedX;
-    }
-
     // Ensure coordinates are within bounds
     normalizedX = Math.max(0, Math.min(1, normalizedX));
     normalizedY = Math.max(0, Math.min(1, normalizedY));
+
+    console.log('Recording:', {x: normalizedX, y: normalizedY});
 
     return { x: normalizedX, y: normalizedY };
   }, [currentGame]);
@@ -166,6 +170,12 @@ const ShotTracking: React.FC = () => {
       teamSide
     });
 
+    // If shot result is goal, increment home team score (single tap = our team goal)
+    if (result === 'goal') {
+      const gameStore = useGameStore.getState();
+      await gameStore.addHomeGoal();
+    }
+
     // Auto-pause on goal or save
     if (result === 'goal' || result === 'save') {
       pauseTracking();
@@ -183,6 +193,10 @@ const ShotTracking: React.FC = () => {
       y: normalizedCoords.y,
       reason
     });
+
+    // Double tap = goal against us, so increment away team score
+    const gameStore = useGameStore.getState();
+    await gameStore.addAwayGoal();
 
     setShowGoalAgainstPopup(false);
   };
@@ -240,7 +254,7 @@ const ShotTracking: React.FC = () => {
 
           {/* Play/Pause button */}
           <button
-            onClick={isTracking && !isPaused ? pauseTracking : resumeTracking}
+            onClick={handlePlayPause}
             className={`p-3 rounded-full transition-colors ${
               isTracking && !isPaused 
                 ? 'bg-orange-500 hover:bg-orange-600' 
