@@ -21,6 +21,11 @@ const ShotTracking: React.FC = () => {
   const [showGoalAgainstPopup, setShowGoalAgainstPopup] = useState(false);
   const [clickPosition, setClickPosition] = useState({ x: 0, y: 0 });
   const [normalizedCoords, setNormalizedCoords] = useState({ x: 0, y: 0 });
+  const [showFaceoffButtons, setShowFaceoffButtons] = useState(false);
+  const [showStartTrackingButton, setShowStartTrackingButton] = useState(true);
+  const [showTimeAdjust, setShowTimeAdjust] = useState(false);
+  const [timeAdjustInput, setTimeAdjustInput] = useState('');
+  const [timeAdjustMode, setTimeAdjustMode] = useState<'+' | '-'>('+');
 
   const {
     currentGame,
@@ -28,12 +33,16 @@ const ShotTracking: React.FC = () => {
     isPaused,
     gameTime,
     shots,
+    events,
     startTracking,
     pauseTracking,
     resumeTracking,
     addShot,
     addGoalAgainst,
-    undoLastShot
+    undoLastShot,
+    adjustTime,
+    addFaceoffWin,
+    addFaceoffLoss
   } = useGameStore();
 
   // Keyboard handler for undo
@@ -48,6 +57,16 @@ const ShotTracking: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [showShotPopup, showGoalAgainstPopup]);
 
+  // Manage start tracking button and faceoff ribbon
+  useEffect(() => {
+    if (currentGame && !isTracking) {
+      setShowStartTrackingButton(true);
+      setShowFaceoffButtons(false);
+    } else {
+      setShowStartTrackingButton(false);
+    }
+  }, [currentGame, isTracking]);
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -57,8 +76,10 @@ const ShotTracking: React.FC = () => {
   const handlePlayPause = () => {
     if (isTracking && !isPaused) {
       pauseTracking();
+      setShowFaceoffButtons(true); // Show faceoff ribbon when pausing
     } else if (isTracking && isPaused) {
       resumeTracking();
+      setShowFaceoffButtons(false); // Hide faceoff ribbon when resuming
     } else {
       startTracking();
     }
@@ -210,28 +231,88 @@ const ShotTracking: React.FC = () => {
     }
   };
 
+  // Faceoff tracking handlers
+  const handleStartTracking = () => {
+    setShowStartTrackingButton(false);
+    setShowFaceoffButtons(true); // Show faceoff ribbon when starting period
+  };
+
+  const handleFaceoffWon = async () => {
+    await addFaceoffWin();
+    setShowFaceoffButtons(false);
+  };
+
+  const handleFaceoffLost = async () => {
+    await addFaceoffLoss();
+    setShowFaceoffButtons(false);
+  };
+
+  const handleFaceoffPlayPause = () => {
+    if (isTracking && !isPaused) {
+      pauseTracking();
+    } else if (isTracking && isPaused) {
+      resumeTracking();
+    } else {
+      startTracking();
+    }
+    // Keep faceoff buttons visible - they decide when to record result
+  };
+
+  const handleTimeAdjust = () => {
+    const seconds = parseInt(timeAdjustInput);
+    if (!isNaN(seconds) && seconds > 0) {
+      const adjustment = timeAdjustMode === '+' ? seconds : -seconds;
+      adjustTime(adjustment);
+      setTimeAdjustInput('');
+      setShowTimeAdjust(false);
+    }
+  };
+
+  // Calculate current period faceoff stats
+  const getCurrentPeriodFaceoffs = () => {
+    if (!currentGame) return { wins: 0, losses: 0, percentage: 0 };
+    
+    const currentPeriod = currentGame.currentPeriod || 1;
+    const periodFaceoffs = events.filter(event => 
+      event.period === currentPeriod && 
+      (event.type === 'faceoff_won' || event.type === 'faceoff_lost')
+    );
+    
+    const wins = periodFaceoffs.filter(event => event.type === 'faceoff_won').length;
+    const losses = periodFaceoffs.filter(event => event.type === 'faceoff_lost').length;
+    const total = wins + losses;
+    const percentage = total > 0 ? (wins / total) * 100 : 0;
+    
+    return { wins, losses, percentage, total };
+  };
+
   if (!currentGame) {
     navigate('/live');
     return null;
   }
 
   const periodTime = getCurrentPeriodTime();
+  const faceoffStats = getCurrentPeriodFaceoffs();
 
   return (
     <div className="fixed inset-0 bg-black">
       {/* Full-screen rink background */}
       <div
         ref={rinkRef}
-        className="absolute inset-0 bg-center bg-contain bg-no-repeat cursor-crosshair"
+        className={`absolute inset-0 bg-center bg-contain bg-no-repeat cursor-crosshair transition-all duration-300 ${
+          showStartTrackingButton ? 'blur-sm' : ''
+        }`}
         style={{
           backgroundImage: 'url(/images/rink.png), url(/images/rink-placeholder.svg)',
           backgroundSize: 'contain'
         }}
-        onClick={handleRinkClick}
+        onClick={showStartTrackingButton ? undefined : handleRinkClick}
       />
 
       {/* Semi-transparent overlay UI */}
-      <div className="absolute inset-0 pointer-events-none">
+      <div className={`absolute inset-0 pointer-events-none transition-all duration-300 ${
+        showStartTrackingButton ? 'blur-sm opacity-50' : ''
+      }`}>
         {/* Top bar */}
         <div className="absolute top-4 left-4 right-4 flex justify-between items-center pointer-events-auto">
           {/* Back button */}
@@ -249,6 +330,9 @@ const ShotTracking: React.FC = () => {
             </div>
             <div className="text-sm opacity-90">
               {currentGame.homeScore || 0} - {currentGame.awayScore || 0}
+            </div>
+            <div className="text-xs text-blue-300 mt-1">
+              Faceoffs: {faceoffStats.wins}-{faceoffStats.losses} ({faceoffStats.percentage.toFixed(0)}%)
             </div>
           </div>
 
@@ -396,6 +480,121 @@ const ShotTracking: React.FC = () => {
               className="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded text-sm"
             >
               Other
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Start Game Button - Centered */}
+      {showStartTrackingButton && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-auto">
+          <button
+            onClick={handleStartTracking}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-6 px-8 rounded-lg shadow-2xl text-xl border-4 border-white"
+          >
+            🏒 Start Game
+          </button>
+        </div>
+      )}
+
+      {/* Faceoff Tracking Ribbon */}
+      {showFaceoffButtons && (
+        <div className="absolute top-20 left-1/2 transform -translate-x-1/2 bg-white rounded-lg shadow-lg border-2 border-blue-500 p-3 z-50 pointer-events-auto">
+          <div className="flex items-center space-x-2">
+            {/* Win Button */}
+            <button
+              onClick={handleFaceoffWon}
+              className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-3 rounded-lg flex items-center space-x-1 text-sm"
+            >
+              <span>✓</span>
+              <span>WIN</span>
+            </button>
+
+            {/* Play/Pause Button */}
+            <button
+              onClick={handleFaceoffPlayPause}
+              className={`font-bold py-2 px-3 rounded-lg flex items-center space-x-1 text-sm ${
+                isTracking && !isPaused 
+                  ? 'bg-orange-500 hover:bg-orange-600 text-white' 
+                  : 'bg-blue-500 hover:bg-blue-600 text-white'
+              }`}
+            >
+              {isTracking && !isPaused ? (
+                <>
+                  <Pause className="w-3 h-3" />
+                  <span>PAUSE</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-3 h-3" />
+                  <span>PLAY</span>
+                </>
+              )}
+            </button>
+
+            {/* Lost Button */}
+            <button
+              onClick={handleFaceoffLost}
+              className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded-lg flex items-center space-x-1 text-sm"
+            >
+              <span>✗</span>
+              <span>LOST</span>
+            </button>
+
+            {/* Time Adjust */}
+            <div className="relative">
+              <button
+                onClick={() => setShowTimeAdjust(!showTimeAdjust)}
+                className="bg-gray-400 hover:bg-gray-500 text-white px-2 py-2 rounded-lg text-xs font-mono"
+                title="Adjust time"
+              >
+                ±T
+              </button>
+              
+              {showTimeAdjust && (
+                <div className="absolute top-full mt-1 right-0 bg-white border rounded-lg shadow-lg p-2 z-10 min-w-24">
+                  <div className="flex items-center space-x-1 text-xs">
+                    {/* +/- Toggle */}
+                    <button
+                      onClick={() => setTimeAdjustMode(timeAdjustMode === '+' ? '-' : '+')}
+                      className={`px-2 py-1 rounded font-bold ${
+                        timeAdjustMode === '+' 
+                          ? 'bg-green-500 text-white' 
+                          : 'bg-red-500 text-white'
+                      }`}
+                    >
+                      {timeAdjustMode}
+                    </button>
+                    
+                    {/* Number Input */}
+                    <input
+                      type="number"
+                      value={timeAdjustInput}
+                      onChange={(e) => setTimeAdjustInput(e.target.value)}
+                      placeholder="sec"
+                      min="1"
+                      className="w-12 px-1 py-1 border rounded text-center text-xs"
+                    />
+                    
+                    {/* Apply Button */}
+                    <button
+                      onClick={handleTimeAdjust}
+                      className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-bold"
+                    >
+                      ✓
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Escape Button */}
+            <button
+              onClick={() => setShowFaceoffButtons(false)}
+              className="bg-gray-400 hover:bg-gray-500 text-white p-2 rounded-lg"
+              title="Skip faceoff tracking"
+            >
+              <X className="w-3 h-3" />
             </button>
           </div>
         </div>

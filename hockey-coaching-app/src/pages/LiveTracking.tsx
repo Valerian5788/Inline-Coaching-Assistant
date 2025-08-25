@@ -30,7 +30,6 @@ const LiveTracking: React.FC = () => {
     isTracking, 
     isPaused, 
     gameTime,
-    events,
     startTracking, 
     pauseTracking, 
     resumeTracking,
@@ -52,6 +51,7 @@ const LiveTracking: React.FC = () => {
       navigate('/games');
     }
   }, [currentGame, navigate]);
+
 
   if (!currentGame) {
     return null;
@@ -121,6 +121,14 @@ const LiveTracking: React.FC = () => {
     }
   };
 
+  const handleHomeGoal = async () => {
+    await addHomeGoal();
+  };
+
+  const handleAwayGoal = async () => {
+    await addAwayGoal();
+  };
+
   const getTeamName = async (teamId: string) => {
     const team = await dbHelpers.getTeamById(teamId);
     return team ? team.name : 'Unknown Team';
@@ -134,30 +142,12 @@ const LiveTracking: React.FC = () => {
     }
   }, [currentGame.homeTeamId]);
 
-  // Calculate current period faceoff stats
-  const getCurrentPeriodFaceoffs = () => {
-    if (!currentGame) return { wins: 0, losses: 0, percentage: 0 };
-    
-    const currentPeriod = currentGame.currentPeriod || 1;
-    const periodFaceoffs = events.filter(event => 
-      event.period === currentPeriod && 
-      (event.type === 'faceoff_won' || event.type === 'faceoff_lost')
-    );
-    
-    const wins = periodFaceoffs.filter(event => event.type === 'faceoff_won').length;
-    const losses = periodFaceoffs.filter(event => event.type === 'faceoff_lost').length;
-    const total = wins + losses;
-    const percentage = total > 0 ? (wins / total) * 100 : 0;
-    
-    return { wins, losses, percentage, total };
-  };
 
   const handleTimeout = async () => {
     if (!currentGame || currentGame.timeoutUsed) return;
     await useTimeout();
   };
 
-  const faceoffStats = getCurrentPeriodFaceoffs();
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
@@ -194,7 +184,7 @@ const LiveTracking: React.FC = () => {
               {currentGame.homeScore || 0}
             </div>
             <button
-              onClick={addHomeGoal}
+              onClick={handleHomeGoal}
               className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg flex items-center space-x-2 mx-auto"
             >
               <Plus className="w-5 h-5" />
@@ -225,7 +215,7 @@ const LiveTracking: React.FC = () => {
               {currentGame.awayScore || 0}
             </div>
             <button
-              onClick={addAwayGoal}
+              onClick={handleAwayGoal}
               className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg flex items-center space-x-2 mx-auto"
             >
               <Plus className="w-5 h-5" />
@@ -343,6 +333,7 @@ const LiveTracking: React.FC = () => {
         </div>
       </div>
 
+
       {/* Faceoff Counter */}
       <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2">
@@ -362,11 +353,11 @@ const LiveTracking: React.FC = () => {
 
           {/* Stats Display */}
           <div className="text-center">
-            <div className="text-3xl font-bold text-gray-900 mb-1">
-              {faceoffStats.wins}-{faceoffStats.losses}
+            <div className="text-3xl font-bold text-gray-400 mb-1">
+              --
             </div>
-            <div className="text-lg font-semibold text-blue-600">
-              {faceoffStats.percentage.toFixed(0)}% won
+            <div className="text-lg text-gray-400">
+              Use Track Data
             </div>
           </div>
 
@@ -389,8 +380,8 @@ const LiveTracking: React.FC = () => {
         >
           <Target className="w-8 h-8" />
           <div>
-            <div className="text-xl">Shot Tracking</div>
-            <div className="text-sm opacity-90">Track shots on rink</div>
+            <div className="text-xl">Track Data</div>
+            <div className="text-sm opacity-90">Live game tracking</div>
           </div>
         </button>
 
@@ -416,6 +407,7 @@ const LiveTracking: React.FC = () => {
           </div>
         </button>
       </div>
+
 
       {/* Manual Time Input Modal */}
       {isTimeInputOpen && (

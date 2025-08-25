@@ -2,13 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../../stores/gameStore';
 import { ArrowLeft, Target, Percent } from 'lucide-react';
-import type { Shot, GoalAgainst } from '../../types';
+import type { Shot } from '../../types';
 
 const QuickStats: React.FC = () => {
   const navigate = useNavigate();
-  const { currentGame, shots: allShots, goalsAgainst, events, isTracking } = useGameStore();
+  const { currentGame, shots: allShots, events, isTracking } = useGameStore();
   const [currentPeriodShots, setCurrentPeriodShots] = useState<Shot[]>([]);
-  const [currentPeriodGoalsAgainst, setCurrentPeriodGoalsAgainst] = useState<GoalAgainst[]>([]);
   const [faceoffStats, setFaceoffStats] = useState({ wins: 0, losses: 0 });
 
   useEffect(() => {
@@ -20,10 +19,6 @@ const QuickStats: React.FC = () => {
     const periodShots = allShots.filter(shot => shot.period === currentPeriod);
     setCurrentPeriodShots(periodShots);
     
-    // Filter goals against for current period
-    const periodGoalsAgainst = goalsAgainst.filter(goal => goal.period === currentPeriod);
-    setCurrentPeriodGoalsAgainst(periodGoalsAgainst);
-    
     // Calculate faceoff stats for current period
     const periodFaceoffs = events.filter(event => 
       event.period === currentPeriod && 
@@ -33,7 +28,7 @@ const QuickStats: React.FC = () => {
     const wins = periodFaceoffs.filter(event => event.type === 'faceoff_won').length;
     const losses = periodFaceoffs.filter(event => event.type === 'faceoff_lost').length;
     setFaceoffStats({ wins, losses });
-  }, [currentGame, allShots, goalsAgainst, events]);
+  }, [currentGame, allShots, events]);
 
   // Auto-refresh every 5 seconds if game is live
   useEffect(() => {
@@ -55,7 +50,6 @@ const QuickStats: React.FC = () => {
   const currentPeriod = currentGame.currentPeriod || 1;
   const ourGoals = currentPeriodShots.filter(shot => shot.result === 'goal').length;
   const ourTotalShots = currentPeriodShots.length;
-  const theirGoals = currentPeriodGoalsAgainst.length;
   
   const shootingPercentage = ourTotalShots > 0 ? (ourGoals / ourTotalShots) * 100 : 0;
   const faceoffTotal = faceoffStats.wins + faceoffStats.losses;
@@ -96,20 +90,6 @@ const QuickStats: React.FC = () => {
           );
         })}
 
-        {/* Their goals (red X marks) */}
-        {currentPeriodGoalsAgainst.map((goal) => (
-          <div
-            key={goal.id}
-            className="absolute text-red-600 font-bold text-lg"
-            style={{
-              left: `${goal.x * 290 + 5}px`,
-              top: `${goal.y * 140 + 5}px`,
-              transform: 'translate(-50%, -50%)'
-            }}
-          >
-            ✗
-          </div>
-        ))}
       </div>
     );
   };
@@ -131,17 +111,11 @@ const QuickStats: React.FC = () => {
 
       {/* Shot Count - Large and prominent */}
       <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-        <h2 className="text-xl font-semibold text-center mb-4">Shots This Period</h2>
-        <div className="flex justify-center items-center space-x-8">
-          <div className="text-center">
-            <div className="text-4xl font-bold text-blue-600">{ourTotalShots}</div>
-            <div className="text-lg text-gray-600">Us</div>
-          </div>
-          <div className="text-3xl font-bold text-gray-400">|</div>
-          <div className="text-center">
-            <div className="text-4xl font-bold text-red-600">{theirGoals}</div>
-            <div className="text-lg text-gray-600">Them</div>
-          </div>
+        <h2 className="text-xl font-semibold text-center mb-4">Our Shots This Period</h2>
+        <div className="text-center">
+          <div className="text-6xl font-bold text-blue-600 mb-2">{ourTotalShots}</div>
+          <div className="text-xl text-gray-600">Total Shots</div>
+          <div className="text-lg text-green-600 mt-2">{ourGoals} Goals</div>
         </div>
       </div>
 
@@ -157,10 +131,6 @@ const QuickStats: React.FC = () => {
           <div className="flex items-center space-x-2">
             <div className="w-4 h-4 bg-blue-600 rounded-full"></div>
             <span>Our Goals</span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-red-600 font-bold">✗</span>
-            <span>Their Goals</span>
           </div>
         </div>
       </div>
