@@ -76,7 +76,7 @@ export interface GoalAgainst {
   reason?: string;
 }
 
-export type GameEventType = 'period_start' | 'period_end' | 'goal_home' | 'goal_away' | 'timeout' | 'penalty' | 'game_start' | 'game_end' | 'faceoff_won' | 'faceoff_lost';
+export type GameEventType = 'period_start' | 'period_end' | 'goal_home' | 'goal_away' | 'timeout' | 'penalty' | 'game_start' | 'game_end' | 'faceoff_won' | 'faceoff_lost' | 'tactical_drawing';
 
 export interface GameEvent {
   id: string;
@@ -147,6 +147,38 @@ export interface GameStats {
 // Training/Drill Types
 export type DrillCategory = 'Shooting' | 'Passing' | 'Defense' | 'Skating' | 'Other';
 
+export type DrawingToolType = 
+  | 'pointer' // Select/move tool
+  | 'arrow' // Normal movement arrow (follows mouse)
+  | 'pass_arrow' // Pass arrow (follows mouse)
+  | 'backward_arrow' // Backward skating arrow (follows mouse)
+  | 'shoot_arrow' // Shooting arrow (follows mouse)
+  | 'puck' // Small black dot
+  | 'defense' // D marker
+  | 'offense' // O marker  
+  | 'opponent' // X marker
+  | 'cone' // Triangle cone
+  | 'text'; // Text annotation with inline editing
+
+export type DrawingColor = 'blue' | 'red' | 'black' | 'yellow';
+export type LineStyle = 'solid' | 'dashed' | 'zigzag';
+export type PlayerPosition = 'F1' | 'F2' | 'F3' | 'D1' | 'D2' | 'G' | 'C';
+
+export interface DrawingElement {
+  id: string;
+  type: DrawingToolType;
+  startPoint: { x: number; y: number };
+  endPoint?: { x: number; y: number }; // For simple arrows
+  path?: { x: number; y: number }[]; // For mouse-following arrows
+  label?: string; // For text/markers
+  color: DrawingColor;
+  selected?: boolean;
+  radius?: number; // For circles/pucks
+  fontSize?: number; // For text
+  isEditing?: boolean; // For inline text editing
+}
+
+// Legacy support - keep DrillElement for backward compatibility
 export interface DrillElement {
   type: 'arrow' | 'circle' | 'x';
   id: string;
@@ -162,10 +194,23 @@ export interface Drill {
   id: string;
   name: string;
   category: DrillCategory;
-  elements: DrillElement[];
+  elements: DrillElement[]; // Legacy elements
+  drawingElements?: DrawingElement[]; // New enhanced elements
   description: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// Tactical drawings for live game tracking
+export interface TacticalDrawing {
+  id: string;
+  gameId: string;
+  elements: DrawingElement[];
+  period: number;
+  gameTime: number; // Time in seconds from game start
+  timestamp: number; // Unix timestamp when drawing was created
+  title?: string;
+  notes?: string;
 }
 
 export interface PracticePlan {

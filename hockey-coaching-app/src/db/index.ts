@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Team, Player, Season, Game, Shot, GoalAgainst, GameEvent, Drill, PracticePlan } from '../types';
+import type { Team, Player, Season, Game, Shot, GoalAgainst, GameEvent, Drill, PracticePlan, TacticalDrawing } from '../types';
 
 export class HockeyDB extends Dexie {
   teams!: Table<Team>;
@@ -11,10 +11,12 @@ export class HockeyDB extends Dexie {
   gameEvents!: Table<GameEvent>;
   drills!: Table<Drill>;
   practicePlans!: Table<PracticePlan>;
+  tacticalDrawings!: Table<TacticalDrawing>;
 
   constructor() {
     super('HockeyCoachingDB');
     
+    // Version 1 - Original schema
     this.version(1).stores({
       teams: 'id, name, shortName',
       players: 'id, teamId, jerseyNumber, position, firstName, lastName',
@@ -25,6 +27,20 @@ export class HockeyDB extends Dexie {
       gameEvents: 'id, gameId, type, period, gameTime, timestamp',
       drills: 'id, name, category, createdAt, updatedAt',
       practicePlans: 'id, name, date, createdAt, updatedAt'
+    });
+
+    // Version 2 - Add tactical drawings table and enhance drills
+    this.version(2).stores({
+      teams: 'id, name, shortName',
+      players: 'id, teamId, jerseyNumber, position, firstName, lastName',
+      seasons: 'id, name, status, type, startDate, endDate',
+      games: 'id, seasonId, homeTeamId, date, status',
+      shots: 'id, gameId, period, timestamp, result, teamSide',
+      goalsAgainst: 'id, gameId, period, timestamp',
+      gameEvents: 'id, gameId, type, period, gameTime, timestamp',
+      drills: 'id, name, category, createdAt, updatedAt',
+      practicePlans: 'id, name, date, createdAt, updatedAt',
+      tacticalDrawings: 'id, gameId, period, gameTime, timestamp'
     });
   }
 }
@@ -280,5 +296,31 @@ export const dbHelpers = {
 
   async deletePracticePlan(id: string): Promise<void> {
     await db.practicePlans.delete(id);
+  },
+
+  // Tactical Drawings
+  async getTacticalDrawingsByGame(gameId: string): Promise<TacticalDrawing[]> {
+    const drawings = await db.tacticalDrawings.where('gameId').equals(gameId).toArray();
+    return drawings.sort((a, b) => b.timestamp - a.timestamp);
+  },
+
+  async getTacticalDrawingById(id: string): Promise<TacticalDrawing | undefined> {
+    return await db.tacticalDrawings.get(id);
+  },
+
+  async createTacticalDrawing(drawing: TacticalDrawing): Promise<string> {
+    return await db.tacticalDrawings.add(drawing);
+  },
+
+  async updateTacticalDrawing(id: string, changes: Partial<TacticalDrawing>): Promise<number> {
+    return await db.tacticalDrawings.update(id, changes);
+  },
+
+  async deleteTacticalDrawing(id: string): Promise<void> {
+    await db.tacticalDrawings.delete(id);
+  },
+
+  async deleteTacticalDrawingsByGame(gameId: string): Promise<void> {
+    await db.tacticalDrawings.where('gameId').equals(gameId).delete();
   }
 };

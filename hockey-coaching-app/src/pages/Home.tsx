@@ -2,14 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../stores/appStore';
 import { dbHelpers } from '../db';
-import type { Game, Team, Season, Shot } from '../types';
+import type { Game, Team } from '../types';
 import { 
   Calendar, 
-  Target, 
   TrendingUp, 
   Users, 
   Play,
-  Trophy,
   Plus,
   Zap
 } from 'lucide-react';
@@ -81,7 +79,7 @@ const Home: React.FC = () => {
     }
   };
 
-  const createQuickGame = async (periods: number, periodMinutes: number, gameType: string) => {
+  const createQuickGame = async (periods: number, periodMinutes: number) => {
     if (!currentSeason || teams.length === 0) {
       alert('Please create a team and season first');
       return;
@@ -233,7 +231,7 @@ const Home: React.FC = () => {
           </div>
           <div className="space-y-2">
             <button
-              onClick={() => createQuickGame(2, 25, 'Senior Game')}
+              onClick={() => createQuickGame(2, 25)}
               className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded flex items-center justify-center space-x-2"
             >
               <Play className="w-4 h-4" />
