@@ -15,8 +15,7 @@ import {
   Home,
   Timer,
   PauseCircle,
-  CheckCircle,
-  TrendingUp
+  CheckCircle
 } from 'lucide-react';
 import { dbHelpers } from '../db';
 
@@ -40,9 +39,7 @@ const LiveTracking: React.FC = () => {
     endGame,
     addHomeGoal,
     addAwayGoal,
-    useTimeout,
-    addFaceoffWin,
-    addFaceoffLoss
+    useTimeout
   } = useGameStore();
 
   useEffect(() => {
@@ -333,42 +330,41 @@ const LiveTracking: React.FC = () => {
         </div>
       </div>
 
-
-      {/* Faceoff Counter */}
+      {/* Game Summary */}
       <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center space-x-2">
-          <TrendingUp className="w-5 h-5" />
-          <span>Faceoffs This Period</span>
+          <BarChart3 className="w-5 h-5" />
+          <span>Game Summary</span>
         </h3>
         
-        <div className="grid grid-cols-3 gap-4 items-center">
-          {/* Win Button */}
-          <button
-            onClick={addFaceoffWin}
-            className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-4 rounded-lg flex items-center justify-center space-x-2 text-lg"
-          >
-            <Plus className="w-6 h-6" />
-            <span>WIN</span>
-          </button>
-
-          {/* Stats Display */}
-          <div className="text-center">
-            <div className="text-3xl font-bold text-gray-400 mb-1">
-              --
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-blue-600">
+              {currentGame?.homeScore || 0} - {currentGame?.awayScore || 0}
             </div>
-            <div className="text-lg text-gray-400">
-              Use Track Data
-            </div>
+            <div className="text-sm text-gray-600">Score</div>
           </div>
-
-          {/* Loss Button */}
-          <button
-            onClick={addFaceoffLoss}
-            className="bg-red-500 hover:bg-red-600 text-white font-bold py-4 px-4 rounded-lg flex items-center justify-center space-x-2 text-lg"
-          >
-            <Plus className="w-6 h-6" />
-            <span>LOSS</span>
-          </button>
+          
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-green-600">
+              P{currentGame?.currentPeriod || 1}
+            </div>
+            <div className="text-sm text-gray-600">Period</div>
+          </div>
+          
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-orange-600">
+              {Math.floor(gameTime / 60)}:{String(gameTime % 60).padStart(2, '0')}
+            </div>
+            <div className="text-sm text-gray-600">Game Time</div>
+          </div>
+          
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-2xl font-bold text-purple-600">
+              {currentGame?.timeoutUsed ? 'Used' : 'Available'}
+            </div>
+            <div className="text-sm text-gray-600">Timeout</div>
+          </div>
         </div>
       </div>
 

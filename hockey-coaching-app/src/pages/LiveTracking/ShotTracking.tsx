@@ -509,7 +509,12 @@ const ShotTracking: React.FC = () => {
             {/* Win Button */}
             <button
               onClick={handleFaceoffWon}
-              className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-3 rounded-lg flex items-center space-x-1 text-sm"
+              disabled={!isTracking || isPaused}
+              className={`font-bold py-2 px-3 rounded-lg flex items-center space-x-1 text-sm transition-colors ${
+                isTracking && !isPaused
+                  ? 'bg-green-500 hover:bg-green-600 text-white cursor-pointer'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
             >
               <span>✓</span>
               <span>WIN</span>
@@ -540,7 +545,12 @@ const ShotTracking: React.FC = () => {
             {/* Lost Button */}
             <button
               onClick={handleFaceoffLost}
-              className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-3 rounded-lg flex items-center space-x-1 text-sm"
+              disabled={!isTracking || isPaused}
+              className={`font-bold py-2 px-3 rounded-lg flex items-center space-x-1 text-sm transition-colors ${
+                isTracking && !isPaused
+                  ? 'bg-red-500 hover:bg-red-600 text-white cursor-pointer'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
             >
               <span>✗</span>
               <span>LOST</span>
@@ -550,7 +560,7 @@ const ShotTracking: React.FC = () => {
             <div className="relative">
               <button
                 onClick={() => setShowTimeAdjust(!showTimeAdjust)}
-                className="bg-gray-400 hover:bg-gray-500 text-white px-2 py-2 rounded-lg text-xs font-mono"
+                className="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-2 rounded-lg text-xs font-mono"
                 title="Adjust time"
               >
                 ±T
