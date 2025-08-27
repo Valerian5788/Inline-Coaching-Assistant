@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Game, Team, Season, RinkSide } from '../types';
+import type { Game, Team, Season, RinkSide, GamePreset } from '../types';
 import { dbHelpers } from '../db';
 import { useAppStore } from '../stores/appStore';
 import { useGameStore } from '../stores/gameStore';
@@ -31,9 +31,19 @@ const Games: React.FC = () => {
   const [isSideSelectionOpen, setIsSideSelectionOpen] = useState(false);
   const [selectedGameForStart, setSelectedGameForStart] = useState<Game | null>(null);
   const [showPresetModal, setShowPresetModal] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState<{periods: number, minutes: number, name: string} | null>(null);
+  const [selectedPreset, setSelectedPreset] = useState<GamePreset | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showEditPresetModal, setShowEditPresetModal] = useState(false);
+  const [presetToEdit, setPresetToEdit] = useState<GamePreset | null>(null);
+  const [gamePresets, setGamePresets] = useState<GamePreset[]>([]);
   const [selectedGameForEdit, setSelectedGameForEdit] = useState<Game | null>(null);
+  const [presetForm, setPresetForm] = useState({
+    name: '',
+    periods: 2,
+    periodMinutes: 20,
+    hasOvertime: false,
+    overtimeMinutes: 5
+  });
   const [seasonFilter, setSeasonFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
@@ -56,7 +66,7 @@ const Games: React.FC = () => {
     overtimeMinutes: 5
   });
 
-  const [presetForm, setPresetForm] = useState({
+  const [gameFromPresetForm, setGameFromPresetForm] = useState({
     awayTeamName: '',
     date: '',
     time: '',
@@ -83,27 +93,29 @@ const Games: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [allGames, allTeams, allSeasons] = await Promise.all([
+      const [allGames, allTeams, allSeasons, allPresets] = await Promise.all([
         dbHelpers.getAllGames(),
         dbHelpers.getAllTeams(), 
-        dbHelpers.getAllSeasons()
+        dbHelpers.getAllSeasons(),
+        dbHelpers.getAllGamePresets()
       ]);
       
       setGames(allGames);
       setTeams(allTeams);
       setSeasons(allSeasons);
+      setGamePresets(allPresets);
       
       // Set default season to active season
       if (currentSeason) {
         setGameForm(prev => ({ ...prev, seasonId: currentSeason.id }));
-        setPresetForm(prev => ({ ...prev, seasonId: currentSeason.id }));
+        setGameFromPresetForm(prev => ({ ...prev, seasonId: currentSeason.id }));
       }
       
       // Set default date/time to now
       const now = new Date();
       const dateStr = now.toISOString().split('T')[0];
       const timeStr = now.toTimeString().slice(0, 5);
-      setPresetForm(prev => ({ ...prev, date: dateStr, time: timeStr }));
+      setGameFromPresetForm(prev => ({ ...prev, date: dateStr, time: timeStr }));
     } finally {
       setLoading(false);
     }
@@ -210,13 +222,25 @@ const Games: React.FC = () => {
   };
 
 
-  const openPresetModal = (periods: number, minutes: number, name: string) => {
-    setSelectedPreset({ periods, minutes, name });
+  const openPresetModal = (preset: GamePreset) => {
+    setSelectedPreset(preset);
     setShowPresetModal(true);
   };
 
+  const openEditPresetModal = (preset: GamePreset) => {
+    setPresetToEdit(preset);
+    setPresetForm({
+      name: preset.name,
+      periods: preset.periods,
+      periodMinutes: preset.periodMinutes,
+      hasOvertime: preset.hasOvertime,
+      overtimeMinutes: preset.overtimeMinutes || 5
+    });
+    setShowEditPresetModal(true);
+  };
+
   const createGameFromPreset = async () => {
-    if (!selectedPreset || !presetForm.awayTeamName.trim()) {
+    if (!selectedPreset || !gameFromPresetForm.awayTeamName.trim()) {
       alert('Please enter opponent name');
       return;
     }
@@ -226,18 +250,18 @@ const Games: React.FC = () => {
       return;
     }
 
-    const gameDateTime = new Date(`${presetForm.date}T${presetForm.time}`).toISOString();
+    const gameDateTime = new Date(`${gameFromPresetForm.date}T${gameFromPresetForm.time}`).toISOString();
     
     const newGame: Game = {
       id: crypto.randomUUID(),
       homeTeamId: teams[0].id, // Use first available team
-      awayTeamName: presetForm.awayTeamName.trim(),
+      awayTeamName: gameFromPresetForm.awayTeamName.trim(),
       date: gameDateTime,
       status: 'planned',
-      seasonId: presetForm.seasonId || currentSeason.id,
+      seasonId: gameFromPresetForm.seasonId || currentSeason.id,
       periods: selectedPreset.periods,
-      periodMinutes: selectedPreset.minutes,
-      hasOvertime: selectedPreset.name === 'Senior Game',
+      periodMinutes: selectedPreset.periodMinutes,
+      hasOvertime: selectedPreset.hasOvertime,
       homeScore: 0,
       awayScore: 0
     };
@@ -245,7 +269,7 @@ const Games: React.FC = () => {
     await dbHelpers.createGame(newGame);
     loadData();
     setShowPresetModal(false);
-    setPresetForm({ awayTeamName: '', date: presetForm.date, time: presetForm.time, seasonId: presetForm.seasonId });
+    setGameFromPresetForm({ awayTeamName: '', date: gameFromPresetForm.date, time: gameFromPresetForm.time, seasonId: gameFromPresetForm.seasonId });
     
     // Show toast notification
     const toast = document.createElement('div');
@@ -255,6 +279,97 @@ const Games: React.FC = () => {
     setTimeout(() => {
       document.body.removeChild(toast);
     }, 2000);
+  };
+
+  const savePreset = async () => {
+    if (!presetToEdit) return;
+    
+    try {
+      await dbHelpers.updateGamePreset(presetToEdit.id, {
+        name: presetForm.name,
+        periods: presetForm.periods,
+        periodMinutes: presetForm.periodMinutes,
+        hasOvertime: presetForm.hasOvertime,
+        overtimeMinutes: presetForm.overtimeMinutes
+      });
+      
+      setShowEditPresetModal(false);
+      setPresetToEdit(null);
+      loadData();
+      
+      // Show toast notification
+      const toast = document.createElement('div');
+      toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+      toast.textContent = 'Preset updated!';
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        document.body.removeChild(toast);
+      }, 2000);
+    } catch (error) {
+      alert('Failed to update preset: ' + error);
+    }
+  };
+
+  const createNewPreset = async () => {
+    if (!presetForm.name.trim()) {
+      alert('Please enter a preset name');
+      return;
+    }
+    
+    const newPreset: GamePreset = {
+      id: crypto.randomUUID(),
+      name: presetForm.name,
+      periods: presetForm.periods,
+      periodMinutes: presetForm.periodMinutes,
+      hasOvertime: presetForm.hasOvertime,
+      overtimeMinutes: presetForm.overtimeMinutes,
+      isDefault: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    try {
+      await dbHelpers.createGamePreset(newPreset);
+      setShowEditPresetModal(false);
+      setPresetToEdit(null);
+      loadData();
+      
+      // Show toast notification
+      const toast = document.createElement('div');
+      toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+      toast.textContent = 'New preset created!';
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        document.body.removeChild(toast);
+      }, 2000);
+    } catch (error) {
+      alert('Failed to create preset: ' + error);
+    }
+  };
+
+  const deletePreset = async (preset: GamePreset) => {
+    if (preset.isDefault) {
+      alert('Cannot delete default presets');
+      return;
+    }
+    
+    if (confirm(`Are you sure you want to delete the "${preset.name}" preset?`)) {
+      try {
+        await dbHelpers.deleteGamePreset(preset.id);
+        loadData();
+        
+        // Show toast notification
+        const toast = document.createElement('div');
+        toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
+        toast.textContent = 'Preset deleted!';
+        document.body.appendChild(toast);
+        setTimeout(() => {
+          document.body.removeChild(toast);
+        }, 2000);
+      } catch (error) {
+        alert('Failed to delete preset: ' + error);
+      }
+    }
   };
 
   const openEditModal = (game: Game) => {
@@ -479,26 +594,68 @@ const Games: React.FC = () => {
           <Zap className="w-5 h-5 text-blue-600" />
           <h3 className="font-semibold text-lg">Quick Game</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="flex justify-between items-center mb-4">
+          <div></div>
           <button
-            onClick={() => openPresetModal(2, 25, 'Senior Game')}
-            className="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
+            onClick={() => {
+              setPresetToEdit(null);
+              setPresetForm({ name: '', periods: 2, periodMinutes: 20, hasOvertime: false, overtimeMinutes: 5 });
+              setShowEditPresetModal(true);
+            }}
+            className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center space-x-1"
           >
-            <Play className="w-6 h-6" />
-            <span className="text-lg">Senior Game</span>
-            <span className="text-sm opacity-90">2 × 25 min</span>
+            <Plus className="w-4 h-4" />
+            <span>Create New Preset</span>
           </button>
-          <button
-            onClick={() => openPresetModal(2, 20, 'Junior Game')}
-            className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
-          >
-            <Clock className="w-6 h-6" />
-            <span className="text-lg">Junior Game</span>
-            <span className="text-sm opacity-90">2 × 20 min</span>
-          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {gamePresets.map((preset) => (
+            <div key={preset.id} className="relative group">
+              <button
+                onClick={() => openPresetModal(preset)}
+                className={`w-full ${
+                  preset.name === 'Senior Game' ? 'bg-green-500 hover:bg-green-600' :
+                  preset.name === 'Junior Game' ? 'bg-blue-500 hover:bg-blue-600' :
+                  'bg-purple-500 hover:bg-purple-600'
+                } text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors`}
+              >
+                {preset.name === 'Senior Game' ? <Play className="w-6 h-6" /> :
+                 preset.name === 'Junior Game' ? <Clock className="w-6 h-6" /> :
+                 <Zap className="w-6 h-6" />}
+                <span className="text-lg">{preset.name}</span>
+                <span className="text-sm opacity-90">
+                  {preset.periods} × {preset.periodMinutes} min{preset.hasOvertime ? ' + OT' : ''}
+                </span>
+              </button>
+              <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditPresetModal(preset);
+                  }}
+                  className="bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-1 rounded shadow-sm"
+                  title="Edit preset"
+                >
+                  <Edit className="w-3 h-3" />
+                </button>
+                {!preset.isDefault && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deletePreset(preset);
+                    }}
+                    className="bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-1 rounded shadow-sm"
+                    title="Delete preset"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
           <button
             onClick={() => setIsCreateOpen(true)}
-            className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
+            className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
           >
             <Plus className="w-6 h-6" />
             <span className="text-lg">Custom Game</span>
@@ -805,7 +962,7 @@ const Games: React.FC = () => {
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4">{selectedPreset.name}</h2>
             <p className="text-gray-600 mb-4">
-              {selectedPreset.periods} periods × {selectedPreset.minutes} minutes
+              {selectedPreset.periods} periods × {selectedPreset.periodMinutes} minutes{selectedPreset.hasOvertime ? ' + Overtime' : ''}
             </p>
             
             <div className="space-y-4">
@@ -813,8 +970,8 @@ const Games: React.FC = () => {
                 <label className="block text-sm font-medium mb-2">Opponent Name *</label>
                 <input
                   type="text"
-                  value={presetForm.awayTeamName}
-                  onChange={(e) => setPresetForm({ ...presetForm, awayTeamName: e.target.value })}
+                  value={gameFromPresetForm.awayTeamName}
+                  onChange={(e) => setGameFromPresetForm({ ...gameFromPresetForm, awayTeamName: e.target.value })}
                   className="w-full p-3 border rounded-lg text-lg"
                   placeholder="Enter opponent name"
                 />
@@ -824,8 +981,8 @@ const Games: React.FC = () => {
                 <label className="block text-sm font-medium mb-2">Date</label>
                 <input
                   type="date"
-                  value={presetForm.date}
-                  onChange={(e) => setPresetForm({ ...presetForm, date: e.target.value })}
+                  value={gameFromPresetForm.date}
+                  onChange={(e) => setGameFromPresetForm({ ...gameFromPresetForm, date: e.target.value })}
                   className="w-full p-3 border rounded-lg"
                 />
               </div>
@@ -834,8 +991,8 @@ const Games: React.FC = () => {
                 <label className="block text-sm font-medium mb-2">Time</label>
                 <input
                   type="time"
-                  value={presetForm.time}
-                  onChange={(e) => setPresetForm({ ...presetForm, time: e.target.value })}
+                  value={gameFromPresetForm.time}
+                  onChange={(e) => setGameFromPresetForm({ ...gameFromPresetForm, time: e.target.value })}
                   className="w-full p-3 border rounded-lg"
                 />
               </div>
@@ -843,8 +1000,8 @@ const Games: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium mb-2">Season</label>
                 <select
-                  value={presetForm.seasonId}
-                  onChange={(e) => setPresetForm({ ...presetForm, seasonId: e.target.value })}
+                  value={gameFromPresetForm.seasonId}
+                  onChange={(e) => setGameFromPresetForm({ ...gameFromPresetForm, seasonId: e.target.value })}
                   className="w-full p-3 border rounded-lg"
                 >
                   {seasons.map(season => (
@@ -983,6 +1140,103 @@ const Games: React.FC = () => {
               </button>
               <button
                 onClick={() => setShowEditModal(false)}
+                className="px-4 py-3 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Preset Modal */}
+      {showEditPresetModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold mb-4">
+              {presetToEdit ? `Edit ${presetToEdit.name}` : 'Create New Preset'}
+            </h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Preset Name *</label>
+                <input
+                  type="text"
+                  value={presetForm.name}
+                  onChange={(e) => setPresetForm({ ...presetForm, name: e.target.value })}
+                  className="w-full p-3 border rounded-lg"
+                  placeholder="Enter preset name"
+                  disabled={presetToEdit?.isDefault}
+                />
+                {presetToEdit?.isDefault && (
+                  <p className="text-xs text-gray-500 mt-1">Default preset names cannot be changed</p>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">Periods</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={presetForm.periods}
+                    onChange={(e) => setPresetForm({ ...presetForm, periods: parseInt(e.target.value) || 1 })}
+                    className="w-full p-3 border rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Minutes/Period</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={presetForm.periodMinutes}
+                    onChange={(e) => setPresetForm({ ...presetForm, periodMinutes: parseInt(e.target.value) || 1 })}
+                    className="w-full p-3 border rounded-lg"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={presetForm.hasOvertime}
+                    onChange={(e) => setPresetForm({ ...presetForm, hasOvertime: e.target.checked })}
+                    className="rounded"
+                  />
+                  <span className="text-sm font-medium">Has Overtime</span>
+                </label>
+              </div>
+              
+              {presetForm.hasOvertime && (
+                <div>
+                  <label className="block text-sm font-medium mb-2">Overtime Minutes</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={presetForm.overtimeMinutes}
+                    onChange={(e) => setPresetForm({ ...presetForm, overtimeMinutes: parseInt(e.target.value) || 5 })}
+                    className="w-full p-3 border rounded-lg"
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="flex space-x-3 mt-6">
+              <button
+                onClick={presetToEdit ? savePreset : createNewPreset}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg"
+              >
+                {presetToEdit ? 'Save Changes' : 'Create Preset'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowEditPresetModal(false);
+                  setPresetToEdit(null);
+                }}
                 className="px-4 py-3 text-gray-600 hover:text-gray-800"
               >
                 Cancel

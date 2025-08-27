@@ -223,3 +223,15 @@ export interface PracticePlan {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface GamePreset {
+  id: string;
+  name: string;
+  periods: number;
+  periodMinutes: number;
+  hasOvertime: boolean;
+  overtimeMinutes?: number;
+  isDefault: boolean; // True for system presets (Senior/Junior), false for user-created
+  createdAt: string;
+  updatedAt: string;
+}

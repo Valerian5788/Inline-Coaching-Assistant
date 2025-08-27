@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Team, Player, Season, Game, Shot, GoalAgainst, GameEvent, Drill, PracticePlan, TacticalDrawing } from '../types';
+import type { Team, Player, Season, Game, Shot, GoalAgainst, GameEvent, Drill, PracticePlan, TacticalDrawing, GamePreset } from '../types';
 
 export class HockeyDB extends Dexie {
   teams!: Table<Team>;
@@ -12,6 +12,7 @@ export class HockeyDB extends Dexie {
   drills!: Table<Drill>;
   practicePlans!: Table<PracticePlan>;
   tacticalDrawings!: Table<TacticalDrawing>;
+  gamePresets!: Table<GamePreset>;
 
   constructor() {
     super('HockeyCoachingDB');
@@ -41,6 +42,47 @@ export class HockeyDB extends Dexie {
       drills: 'id, name, category, createdAt, updatedAt',
       practicePlans: 'id, name, date, createdAt, updatedAt',
       tacticalDrawings: 'id, gameId, period, gameTime, timestamp'
+    });
+
+    // Version 3 - Add game presets table
+    this.version(3).stores({
+      teams: 'id, name, shortName',
+      players: 'id, teamId, jerseyNumber, position, firstName, lastName',
+      seasons: 'id, name, status, type, startDate, endDate',
+      games: 'id, seasonId, homeTeamId, date, status',
+      shots: 'id, gameId, period, timestamp, result, teamSide',
+      goalsAgainst: 'id, gameId, period, timestamp',
+      gameEvents: 'id, gameId, type, period, gameTime, timestamp',
+      drills: 'id, name, category, createdAt, updatedAt',
+      practicePlans: 'id, name, date, createdAt, updatedAt',
+      tacticalDrawings: 'id, gameId, period, gameTime, timestamp',
+      gamePresets: 'id, name, isDefault, createdAt, updatedAt'
+    }).upgrade(tx => {
+      // Add default presets on upgrade
+      const now = new Date().toISOString();
+      return Promise.all([
+        tx.table('gamePresets').add({
+          id: 'preset-senior',
+          name: 'Senior Game',
+          periods: 2,
+          periodMinutes: 25,
+          hasOvertime: true,
+          overtimeMinutes: 5,
+          isDefault: true,
+          createdAt: now,
+          updatedAt: now
+        }),
+        tx.table('gamePresets').add({
+          id: 'preset-junior',
+          name: 'Junior Game',
+          periods: 2,
+          periodMinutes: 20,
+          hasOvertime: false,
+          isDefault: true,
+          createdAt: now,
+          updatedAt: now
+        })
+      ]);
     });
   }
 }
@@ -322,5 +364,41 @@ export const dbHelpers = {
 
   async deleteTacticalDrawingsByGame(gameId: string): Promise<void> {
     await db.tacticalDrawings.where('gameId').equals(gameId).delete();
+  },
+
+  // Game Presets
+  async getAllGamePresets(): Promise<GamePreset[]> {
+    const presets = await db.gamePresets.toArray();
+    return presets.sort((a, b) => {
+      // Default presets first, then by name
+      if (a.isDefault !== b.isDefault) {
+        return a.isDefault ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  },
+
+  async getGamePresetById(id: string): Promise<GamePreset | undefined> {
+    return await db.gamePresets.get(id);
+  },
+
+  async createGamePreset(preset: GamePreset): Promise<string> {
+    return await db.gamePresets.add(preset);
+  },
+
+  async updateGamePreset(id: string, changes: Partial<GamePreset>): Promise<number> {
+    const updateData = {
+      ...changes,
+      updatedAt: new Date().toISOString()
+    };
+    return await db.gamePresets.update(id, updateData);
+  },
+
+  async deleteGamePreset(id: string): Promise<void> {
+    const preset = await db.gamePresets.get(id);
+    if (preset?.isDefault) {
+      throw new Error('Cannot delete default presets');
+    }
+    await db.gamePresets.delete(id);
   }
 };
