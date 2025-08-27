@@ -236,57 +236,6 @@ const drawWavySmoothPath = (ctx: CanvasRenderingContext2D, points: { x: number; 
   ctx.stroke();
 };
 
-// Helper function to draw wavy path like the example
-const drawWavyPath = (ctx: CanvasRenderingContext2D, points: { x: number; y: number }[]) => {
-  if (points.length < 2) return;
-
-  const start = points[0];
-  const end = points[points.length - 1];
-  
-  // Calculate path direction and length
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const length = Math.sqrt(dx * dx + dy * dy);
-  
-  if (length < 10) return; // Too short for waves
-  
-  // Wave parameters
-  const numWaves = Math.max(3, Math.floor(length / 25));
-  const amplitude = 8;
-  
-  // Unit vector along the path
-  const unitX = dx / length;
-  const unitY = dy / length;
-  
-  // Perpendicular unit vector for wave offset
-  const perpX = -unitY;
-  const perpY = unitX;
-  
-  ctx.beginPath();
-  ctx.moveTo(start.x, start.y);
-  
-  // Draw wavy segments
-  for (let i = 1; i <= numWaves * 2; i++) {
-    const t = i / (numWaves * 2);
-    const baseX = start.x + t * dx;
-    const baseY = start.y + t * dy;
-    
-    // Alternate wave direction
-    const waveOffset = (i % 2 === 0) ? amplitude : -amplitude;
-    const x = baseX + perpX * waveOffset;
-    const y = baseY + perpY * waveOffset;
-    
-    if (i === 1) {
-      ctx.quadraticCurveTo(x, y, baseX, baseY);
-    } else {
-      ctx.quadraticCurveTo(x, y, baseX, baseY);
-    }
-  }
-  
-  ctx.lineTo(end.x, end.y);
-  ctx.stroke();
-};
-
 const drawShootArrowPath = (ctx: CanvasRenderingContext2D, points: { x: number; y: number }[]) => {
   if (points.length < 2) return;
 

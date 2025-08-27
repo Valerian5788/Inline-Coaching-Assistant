@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Target, Edit, Trash2, Share2, Filter } from 'lucide-react';
+import { Plus, Target, Edit, Trash2, Share2, Filter, Clock, Tag } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { dbHelpers } from '../db';
 import type { Drill } from '../types';
@@ -20,8 +20,20 @@ const DrillThumbnail: React.FC<{ drill: Drill }> = ({ drill }) => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(rinkImage, 0, 0, canvas.width, canvas.height);
 
+    // Get elements from new or legacy format
+    let elements: any[] = [];
+    if (drill.canvasData) {
+      try {
+        elements = JSON.parse(drill.canvasData);
+      } catch (error) {
+        elements = drill.elements || [];
+      }
+    } else {
+      elements = drill.elements || [];
+    }
+    
     // Draw drill elements (simplified for thumbnail)
-    drill.elements.forEach(element => {
+    elements.forEach(element => {
       ctx.strokeStyle = element.color || '#2563eb';
       ctx.fillStyle = element.color || '#2563eb';
       ctx.lineWidth = 1.5;
@@ -87,7 +99,7 @@ const DrillThumbnail: React.FC<{ drill: Drill }> = ({ drill }) => {
           break;
       }
     });
-  }, [rinkImage, drill.elements]);
+  }, [rinkImage, drill.canvasData, drill.elements]);
 
   useEffect(() => {
     const img = new Image();
@@ -101,7 +113,7 @@ const DrillThumbnail: React.FC<{ drill: Drill }> = ({ drill }) => {
     if (rinkImage) {
       drawThumbnail();
     }
-  }, [rinkImage, drill.elements, drawThumbnail]);
+  }, [rinkImage, drill.canvasData, drill.elements, drawThumbnail]);
 
   return (
     <canvas
@@ -116,6 +128,8 @@ const DrillThumbnail: React.FC<{ drill: Drill }> = ({ drill }) => {
 const Training: React.FC = () => {
   const [drills, setDrills] = useState<Drill[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<string[]>([]);
 
   const categories = ['All', 'Shooting', 'Passing', 'Defense', 'Skating', 'Other'];
 
@@ -127,14 +141,28 @@ const Training: React.FC = () => {
     try {
       const loadedDrills = await dbHelpers.getAllDrills();
       setDrills(loadedDrills);
+      
+      // Extract all unique tags from drills
+      const tagSet = new Set<string>();
+      loadedDrills.forEach(drill => {
+        drill.tags?.forEach(tag => tagSet.add(tag));
+      });
+      setAllTags(Array.from(tagSet).sort());
     } catch (error) {
       console.error('Error loading drills:', error);
     }
   };
 
-  const filteredDrills = selectedCategory === 'All' 
-    ? drills 
-    : drills.filter(drill => drill.category === selectedCategory);
+  const filteredDrills = drills.filter(drill => {
+    // Filter by category
+    const categoryMatch = selectedCategory === 'All' || drill.category === selectedCategory;
+    
+    // Filter by tags
+    const tagMatch = selectedTags.length === 0 || 
+      (drill.tags && selectedTags.some(tag => drill.tags!.includes(tag)));
+    
+    return categoryMatch && tagMatch;
+  });
 
   const deleteDrill = async (drillId: string) => {
     if (window.confirm('Delete this drill? This cannot be undone.')) {
@@ -167,8 +195,21 @@ const Training: React.FC = () => {
           // Draw rink background
           ctx.drawImage(rinkImage, 0, 0, canvas.width, canvas.height);
           
+          // Get elements from new or legacy format
+          let elements: any[] = [];
+          if (drill.canvasData) {
+            try {
+              elements = JSON.parse(drill.canvasData);
+            } catch (error) {
+              console.error('Error parsing canvas data:', error);
+              elements = drill.elements || [];
+            }
+          } else {
+            elements = drill.elements || [];
+          }
+          
           // Draw drill elements
-          drill.elements.forEach(element => {
+          elements.forEach(element => {
             ctx.strokeStyle = element.color || '#2563eb';
             ctx.fillStyle = element.color || '#2563eb';
             ctx.lineWidth = 2;
@@ -267,7 +308,7 @@ const Training: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${drill.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
+      a.download = `${(drill.title || drill.name || 'drill').replace(/[^a-z0-9]/gi, '_').toLowerCase()}.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -306,22 +347,61 @@ const Training: React.FC = () => {
         </div>
       </div>
 
-      {/* Category Filter */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        <Filter className="w-5 h-5 text-gray-500 my-auto mr-2" />
-        {categories.map(category => (
-          <button
-            key={category}
-            onClick={() => setSelectedCategory(category)}
-            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-              selectedCategory === category
-                ? 'bg-blue-100 text-blue-700 border-2 border-blue-200'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            {category}
-          </button>
-        ))}
+      {/* Filters */}
+      <div className="space-y-4 mb-6">
+        {/* Category Filter */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Filter className="w-5 h-5 text-gray-500 mr-1" />
+          <span className="text-sm font-medium text-gray-700 mr-2">Category:</span>
+          {categories.map(category => (
+            <button
+              key={category}
+              onClick={() => setSelectedCategory(category)}
+              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors min-h-[36px] ${
+                selectedCategory === category
+                  ? 'bg-blue-100 text-blue-700 border-2 border-blue-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {category}
+            </button>
+          ))}
+        </div>
+        
+        {/* Tag Filter */}
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Tag className="w-5 h-5 text-gray-500 mr-1" />
+            <span className="text-sm font-medium text-gray-700 mr-2">Tags:</span>
+            {allTags.map(tag => (
+              <button
+                key={tag}
+                onClick={() => {
+                  setSelectedTags(prev => 
+                    prev.includes(tag) 
+                      ? prev.filter(t => t !== tag)
+                      : [...prev, tag]
+                  );
+                }}
+                className={`px-3 py-1 rounded-full text-sm font-medium transition-colors min-h-[36px] ${
+                  selectedTags.includes(tag)
+                    ? 'bg-green-100 text-green-700 border-2 border-green-200'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {tag}
+              </button>
+            ))}
+            {selectedTags.length > 0 && (
+              <button
+                onClick={() => setSelectedTags([])}
+                className="px-3 py-1 rounded-full text-sm font-medium text-red-600 hover:bg-red-50 border border-red-200 min-h-[36px]"
+              >
+                Clear Tags
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Drills Grid */}
@@ -329,10 +409,15 @@ const Training: React.FC = () => {
         <div className="text-center py-12">
           <Target className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">
-            {selectedCategory === 'All' ? 'No drills yet' : `No ${selectedCategory.toLowerCase()} drills yet`}
+            {selectedCategory === 'All' && selectedTags.length === 0 
+              ? 'No drills yet' 
+              : 'No matching drills found'}
           </h3>
           <p className="text-gray-600 mb-4">
-            Start by creating your first drill to build your practice library
+            {selectedCategory === 'All' && selectedTags.length === 0
+              ? 'Start by creating your first drill to build your practice library'
+              : 'Try adjusting your filters or create a new drill'
+            }
           </p>
           <Link
             to="/training/drill-designer"
@@ -354,11 +439,37 @@ const Training: React.FC = () => {
               {/* Drill Info */}
               <div className="p-4">
                 <div className="flex justify-between items-start mb-2">
-                  <h3 className="font-medium text-gray-900 truncate">{drill.name}</h3>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
-                    {drill.category}
-                  </span>
+                  <h3 className="font-medium text-gray-900 truncate">
+                    {drill.title || drill.name}
+                  </h3>
+                  <div className="flex items-center gap-1">
+                    {drill.duration && (
+                      <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {drill.duration}m
+                      </span>
+                    )}
+                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
+                      {drill.category}
+                    </span>
+                  </div>
                 </div>
+                
+                {/* Tags */}
+                {drill.tags && drill.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {drill.tags.slice(0, 2).map(tag => (
+                      <span key={tag} className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                        {tag}
+                      </span>
+                    ))}
+                    {drill.tags.length > 2 && (
+                      <span className="text-xs text-gray-500 px-2 py-1">
+                        +{drill.tags.length - 2}
+                      </span>
+                    )}
+                  </div>
+                )}
                 
                 <p className="text-gray-600 text-sm mb-3 line-clamp-2">
                   {drill.description || 'No description'}

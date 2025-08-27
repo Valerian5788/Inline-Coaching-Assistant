@@ -77,10 +77,10 @@ const DrillDesigner: React.FC = () => {
     try {
       const drill = await dbHelpers.getDrillById(drillId);
       if (drill) {
-        setDrillName(drill.name);
+        setDrillName(drill.title || drill.name || '');
         setDrillCategory(drill.category);
-        setDrillDescription(drill.description);
-        setElements(drill.elements);
+        setDrillDescription(drill.description || '');
+        setElements(drill.elements || []);
       }
     } catch (error) {
       console.error('Error loading drill:', error);
@@ -265,7 +265,9 @@ const DrillDesigner: React.FC = () => {
 
     const drill: Drill = {
       id: id || Date.now().toString(),
-      name: drillName.trim(),
+      title: drillName.trim(),
+      name: drillName.trim(), // Legacy compatibility
+      tags: [], // Default empty tags
       category: drillCategory,
       elements,
       description: drillDescription.trim(),

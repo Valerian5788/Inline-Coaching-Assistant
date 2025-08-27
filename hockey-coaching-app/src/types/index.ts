@@ -192,11 +192,16 @@ export interface DrillElement {
 
 export interface Drill {
   id: string;
-  name: string;
-  category: DrillCategory;
-  elements: DrillElement[]; // Legacy elements
-  drawingElements?: DrawingElement[]; // New enhanced elements
+  title: string;
   description: string;
+  tags: string[];
+  category: DrillCategory;
+  duration?: number; // Duration in minutes
+  canvasData?: string; // JSON string of DrawingElement[]
+  // Legacy support - backward compatibility
+  name?: string; // Mapped to title for old data
+  elements?: DrillElement[]; // Legacy elements
+  drawingElements?: DrawingElement[]; // New enhanced elements
   createdAt: string;
   updatedAt: string;
 }

@@ -26,7 +26,7 @@ export class HockeyDB extends Dexie {
       shots: 'id, gameId, period, timestamp, result, teamSide',
       goalsAgainst: 'id, gameId, period, timestamp',
       gameEvents: 'id, gameId, type, period, gameTime, timestamp',
-      drills: 'id, name, category, createdAt, updatedAt',
+      drills: 'id, title, description, tags, category, duration, canvasData, createdAt, updatedAt',
       practicePlans: 'id, name, date, createdAt, updatedAt'
     });
 
@@ -39,7 +39,7 @@ export class HockeyDB extends Dexie {
       shots: 'id, gameId, period, timestamp, result, teamSide',
       goalsAgainst: 'id, gameId, period, timestamp',
       gameEvents: 'id, gameId, type, period, gameTime, timestamp',
-      drills: 'id, name, category, createdAt, updatedAt',
+      drills: 'id, title, description, tags, category, duration, canvasData, createdAt, updatedAt',
       practicePlans: 'id, name, date, createdAt, updatedAt',
       tacticalDrawings: 'id, gameId, period, gameTime, timestamp'
     });
@@ -53,7 +53,7 @@ export class HockeyDB extends Dexie {
       shots: 'id, gameId, period, timestamp, result, teamSide',
       goalsAgainst: 'id, gameId, period, timestamp',
       gameEvents: 'id, gameId, type, period, gameTime, timestamp',
-      drills: 'id, name, category, createdAt, updatedAt',
+      drills: 'id, title, description, tags, category, duration, canvasData, createdAt, updatedAt',
       practicePlans: 'id, name, date, createdAt, updatedAt',
       tacticalDrawings: 'id, gameId, period, gameTime, timestamp',
       gamePresets: 'id, name, isDefault, createdAt, updatedAt'
@@ -83,6 +83,37 @@ export class HockeyDB extends Dexie {
           updatedAt: now
         })
       ]);
+    });
+
+    // Version 4 - Update drills schema for enhanced metadata
+    this.version(4).stores({
+      teams: 'id, name, shortName',
+      players: 'id, teamId, jerseyNumber, position, firstName, lastName',
+      seasons: 'id, name, status, type, startDate, endDate',
+      games: 'id, seasonId, homeTeamId, date, status',
+      shots: 'id, gameId, period, timestamp, result, teamSide',
+      goalsAgainst: 'id, gameId, period, timestamp',
+      gameEvents: 'id, gameId, type, period, gameTime, timestamp',
+      drills: 'id, title, description, *tags, category, duration, canvasData, createdAt, updatedAt',
+      practicePlans: 'id, name, date, createdAt, updatedAt',
+      tacticalDrawings: 'id, gameId, period, gameTime, timestamp',
+      gamePresets: 'id, name, isDefault, createdAt, updatedAt'
+    }).upgrade(async (tx) => {
+      // Migrate existing drills to new schema
+      const existingDrills = await tx.table('drills').toArray();
+      const updates = existingDrills.map(async (drill: any) => {
+        const updatedDrill = {
+          ...drill,
+          title: drill.name || drill.title || '',
+          description: drill.description || '',
+          tags: drill.tags || [],
+          duration: drill.duration || null,
+          canvasData: drill.drawingElements ? JSON.stringify(drill.drawingElements) : 
+                     (drill.elements ? JSON.stringify(drill.elements) : null)
+        };
+        return tx.table('drills').put(updatedDrill);
+      });
+      await Promise.all(updates);
     });
   }
 }
@@ -296,6 +327,13 @@ export const dbHelpers = {
   async getDrillsByCategory(category: string): Promise<Drill[]> {
     if (category === 'All') return this.getAllDrills();
     return await db.drills.where('category').equals(category).toArray();
+  },
+
+  async getDrillsByTags(tags: string[]): Promise<Drill[]> {
+    const allDrills = await this.getAllDrills();
+    return allDrills.filter(drill => 
+      drill.tags && tags.some(tag => drill.tags.includes(tag))
+    );
   },
 
   async createDrill(drill: Drill): Promise<string> {

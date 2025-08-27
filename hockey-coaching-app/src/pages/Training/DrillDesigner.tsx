@@ -1,16 +1,28 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Share2, ArrowLeft, Settings } from 'lucide-react';
+import { Save, ArrowLeft, Plus, Trash2, Clock, WifiOff } from 'lucide-react';
 import { dbHelpers } from '../../db';
 import AdvancedDrawingCanvas from '../../components/AdvancedDrawingCanvas';
 import ProfessionalToolbar from '../../components/ProfessionalToolbar';
 import { useDrawingHistory } from '../../lib/drawing/history';
 import { generateId } from '../../lib/drawing/utils';
+// import { useToast } from '../../contexts/ToastContext';
 import type { Drill, DrillCategory, DrawingElement, DrawingToolType, DrawingColor } from '../../types';
+
+const PREDEFINED_TAGS = [
+  'Offensive', 'Defensive', 'Warmup', 'Skills', 'Conditioning', 
+  'Powerplay', 'Penalty Kill', 'Breakout', 'Forechecking', 'Transition'
+];
 
 const DrillDesigner: React.FC = () => {
   const { id } = useParams<{ id?: string }>();
   const navigate = useNavigate();
+  // Simple notification functions for now - can be replaced with toast system later
+  const showSuccess = (msg: string) => console.log('Success:', msg);
+  const showError = (msg: string) => console.error('Error:', msg);
+  const showWarning = (msg: string) => console.warn('Warning:', msg);
+  const showInfo = (msg: string) => console.info('Info:', msg);
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Drawing state
   const [drawingElements, setDrawingElements] = useState<DrawingElement[]>([]);
@@ -21,15 +33,48 @@ const DrillDesigner: React.FC = () => {
   // History management
   const { saveState, undo, redo, clear: clearHistory, canUndo, canRedo } = useDrawingHistory();
   
-  // Drill metadata
-  const [drillName, setDrillName] = useState('');
-  const [drillCategory, setDrillCategory] = useState<DrillCategory>('Shooting');
+  // Drill metadata - enhanced for tablet use
+  const [drillTitle, setDrillTitle] = useState('');
   const [drillDescription, setDrillDescription] = useState('');
+  const [drillCategory, setDrillCategory] = useState<DrillCategory>('Shooting');
+  const [drillTags, setDrillTags] = useState<string[]>([]);
+  const [drillDuration, setDrillDuration] = useState<number | null>(null);
+  const [customTag, setCustomTag] = useState('');
+  
+  // UI state
   const [isLoading, setIsLoading] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [failedSaves, setFailedSaves] = useState(0);
+
   const categories: DrillCategory[] = ['Shooting', 'Passing', 'Defense', 'Skating', 'Other'];
+
+  // Handle online/offline status
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      showInfo('Connection restored - auto-save enabled');
+      // Retry failed saves
+      if (failedSaves > 0 && drillTitle.trim()) {
+        autoSaveDrill();
+      }
+    };
+    
+    const handleOffline = () => {
+      setIsOnline(false);
+      showWarning('No internet connection - changes saved locally');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [failedSaves, drillTitle, showInfo, showWarning]);
 
   // Load existing drill if editing
   useEffect(() => {
@@ -40,33 +85,69 @@ const DrillDesigner: React.FC = () => {
 
   // Track unsaved changes
   useEffect(() => {
-    setHasUnsavedChanges(true);
-  }, [drawingElements, drillName, drillCategory, drillDescription]);
+    if (drillTitle || drillDescription || drillTags.length > 0 || drawingElements.length > 0) {
+      setHasUnsavedChanges(true);
+      setSaveStatus('unsaved');
+      
+      // Setup auto-save timer
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+      
+      autoSaveTimerRef.current = setTimeout(() => {
+        if (drillTitle.trim()) { // Only auto-save if there's at least a title
+          autoSaveDrill();
+        }
+      }, 5000); // Auto-save every 5 seconds
+    }
+    
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [drawingElements, drillTitle, drillDescription, drillTags, drillCategory, drillDuration]);
 
   const loadDrill = async (drillId: string) => {
     try {
       setIsLoading(true);
       const drill = await dbHelpers.getDrillById(drillId);
       if (drill) {
-        setDrillName(drill.name);
+        // Handle backward compatibility
+        setDrillTitle(drill.title || drill.name || '');
+        setDrillDescription(drill.description || '');
         setDrillCategory(drill.category);
-        setDrillDescription(drill.description);
+        setDrillTags(drill.tags || []);
+        setDrillDuration(drill.duration || null);
         
-        // Load new drawing elements if available, fallback to legacy elements
-        if (drill.drawingElements && drill.drawingElements.length > 0) {
-          setDrawingElements(drill.drawingElements);
+        // Load drawing elements
+        let elements: DrawingElement[] = [];
+        
+        if (drill.canvasData) {
+          // New format - parse JSON canvas data
+          try {
+            elements = JSON.parse(drill.canvasData);
+          } catch (error) {
+            console.error('Error parsing canvas data:', error);
+          }
+        } else if (drill.drawingElements && drill.drawingElements.length > 0) {
+          // Intermediate format
+          elements = drill.drawingElements;
         } else if (drill.elements && drill.elements.length > 0) {
-          // Convert legacy elements to new format
-          const convertedElements = convertLegacyElements(drill.elements);
-          setDrawingElements(convertedElements);
+          // Legacy format - convert old elements
+          elements = convertLegacyElements(drill.elements);
         }
         
+        setDrawingElements(elements);
         setHasUnsavedChanges(false);
+        setSaveStatus('saved');
+        setLastSaved(new Date(drill.updatedAt));
         clearHistory();
       }
     } catch (error) {
       console.error('Error loading drill:', error);
-      alert('Error loading drill. Please try again.');
+      showError('Failed to load drill. Please try again.');
+      setSaveStatus('error');
     } finally {
       setIsLoading(false);
     }
@@ -119,22 +200,42 @@ const DrillDesigner: React.FC = () => {
     saveState(drawingElements);
   }, [drawingElements, saveState]);
 
-  const saveDrill = async () => {
-    if (!drillName.trim()) {
-      alert('Please enter a drill name');
-      return;
+  const toggleTag = (tag: string) => {
+    setDrillTags(prev => 
+      prev.includes(tag) 
+        ? prev.filter(t => t !== tag)
+        : [...prev, tag]
+    );
+  };
+
+  const addCustomTag = () => {
+    const tag = customTag.trim();
+    if (tag && !drillTags.includes(tag)) {
+      setDrillTags(prev => [...prev, tag]);
+      setCustomTag('');
     }
+  };
+
+  const removeTag = (tagToRemove: string) => {
+    setDrillTags(prev => prev.filter(tag => tag !== tagToRemove));
+  };
+
+  const autoSaveDrill = async () => {
+    if (!drillTitle.trim()) return;
 
     try {
-      setIsLoading(true);
+      setSaveStatus('saving');
       
       const drill: Drill = {
         id: id || generateId(),
-        name: drillName.trim(),
-        category: drillCategory,
-        elements: [], // Keep empty for legacy compatibility
-        drawingElements, // Use new drawing elements
+        title: drillTitle.trim(),
         description: drillDescription.trim(),
+        tags: drillTags,
+        category: drillCategory,
+        duration: drillDuration || undefined,
+        canvasData: JSON.stringify(drawingElements),
+        // Legacy compatibility
+        elements: [],
         createdAt: id ? (await dbHelpers.getDrillById(id))?.createdAt || new Date().toISOString() : new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -142,38 +243,87 @@ const DrillDesigner: React.FC = () => {
       if (id) {
         await dbHelpers.updateDrill(id, drill);
       } else {
-        await dbHelpers.createDrill(drill);
+        // For new drills, we need to set the ID after creation
+        const newId = await dbHelpers.createDrill(drill);
+        // Update URL to reflect the new drill ID
+        window.history.replaceState(null, '', `/training/drill-designer/${newId}`);
       }
       
       setHasUnsavedChanges(false);
-      navigate('/training');
+      setSaveStatus('saved');
+      setLastSaved(new Date());
+      setFailedSaves(0);
+      
+      // Only show success toast for manual saves, not auto-saves
+      if (!isOnline) {
+        showInfo('Drill saved locally (offline)');
+      }
+    } catch (error) {
+      console.error('Error auto-saving drill:', error);
+      setSaveStatus('error');
+      setFailedSaves(prev => prev + 1);
+      
+      if (!isOnline) {
+        showWarning('Drill saved locally - will sync when online');
+      } else {
+        showError(`Auto-save failed (attempt ${failedSaves + 1})`);
+      }
+    }
+  };
+
+  const saveDrill = async () => {
+    if (!drillTitle.trim()) {
+      showError('Please enter a drill title');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      await autoSaveDrill();
+      showSuccess('Drill saved successfully!');
+      
+      // Small delay to show success message before navigating
+      setTimeout(() => {
+        navigate('/training');
+      }, 1000);
     } catch (error) {
       console.error('Error saving drill:', error);
-      alert('Error saving drill. Please try again.');
+      showError('Failed to save drill. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const shareDrill = async () => {
-    const drillData = {
-      name: drillName,
-      category: drillCategory,
-      description: drillDescription,
-      elements: drawingElements,
-      exportedAt: new Date().toISOString()
-    };
+  const saveAndNew = async () => {
+    if (!drillTitle.trim()) {
+      showError('Please enter a drill title');
+      return;
+    }
 
-    const dataStr = JSON.stringify(drillData, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${drillName || 'drill'}.json`;
-    a.click();
-    
-    URL.revokeObjectURL(url);
+    try {
+      setIsLoading(true);
+      await autoSaveDrill();
+      
+      // Reset form for new drill
+      setDrawingElements([]);
+      setDrillTitle('');
+      setDrillDescription('');
+      setDrillTags([]);
+      setDrillDuration(null);
+      setSelectedElements([]);
+      clearHistory();
+      setHasUnsavedChanges(false);
+      setSaveStatus('saved');
+      
+      // Update URL to new drill
+      window.history.replaceState(null, '', '/training/drill-designer');
+      showSuccess('Drill saved! Ready for new drill.');
+    } catch (error) {
+      console.error('Error saving drill:', error);
+      showError('Failed to save drill. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Handle keyboard shortcuts
@@ -200,28 +350,11 @@ const DrillDesigner: React.FC = () => {
             break;
         }
       }
-      
-      // Tool shortcuts (only when not in input field and settings panel is closed)
-      if (!showSettings && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
-        switch (e.key.toLowerCase()) {
-          case 'v': setSelectedTool('pointer'); break;
-          case 'a': setSelectedTool('arrow'); break;
-          case 'p': setSelectedTool('pass_arrow'); break;
-          case 'b': setSelectedTool('backward_arrow'); break;
-          case 's': setSelectedTool('shoot_arrow'); break;
-          case 'u': setSelectedTool('puck'); break;
-          case 'd': setSelectedTool('defense'); break;
-          case 'o': setSelectedTool('offense'); break;
-          case 'x': setSelectedTool('opponent'); break;
-          case 'c': setSelectedTool('cone'); break;
-          case 't': setSelectedTool('text'); break;
-        }
-      }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, showSettings]);
+  }, [handleUndo, handleRedo]);
 
   // Warn about unsaved changes
   useEffect(() => {
@@ -236,9 +369,29 @@ const DrillDesigner: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
 
+  // Get save status indicator
+  const getSaveStatusDisplay = () => {
+    switch (saveStatus) {
+      case 'saving':
+        return <span className="text-orange-600">Saving...</span>;
+      case 'saved':
+        return lastSaved ? (
+          <span className="text-green-600">
+            Saved {lastSaved.toLocaleTimeString()}
+          </span>
+        ) : <span className="text-green-600">Saved</span>;
+      case 'unsaved':
+        return <span className="text-orange-600">Unsaved changes</span>;
+      case 'error':
+        return <span className="text-red-600">Save failed</span>;
+      default:
+        return null;
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100 relative">
-      {/* Header */}
+    <div className="min-h-screen bg-gray-100 flex flex-col">
+      {/* Header - Fixed at top */}
       <div className="bg-white border-b px-4 py-3 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -249,187 +402,262 @@ const DrillDesigner: React.FC = () => {
                 }
                 navigate('/training');
               }}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors min-h-[44px] min-w-[44px] justify-center"
             >
               <ArrowLeft className="w-5 h-5" />
-              <span className="hidden sm:inline">Back to Training</span>
+              <span className="hidden sm:inline">Back</span>
             </button>
             <div>
               <h1 className="text-xl font-bold text-gray-900">
                 {id ? 'Edit Drill' : 'New Drill'}
-                {hasUnsavedChanges && <span className="text-orange-500 ml-2">•</span>}
               </h1>
-              {drillName && (
-                <p className="text-sm text-gray-600 mt-1">{drillName}</p>
-              )}
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                {getSaveStatusDisplay()}
+                {!isOnline && (
+                  <div className="flex items-center gap-1 text-orange-600">
+                    <WifiOff className="w-4 h-4" />
+                    <span>Offline</span>
+                  </div>
+                )}
+                {isOnline && failedSaves > 0 && (
+                  <div className="flex items-center gap-1 text-red-600">
+                    <span>Sync pending ({failedSaves})</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowSettings(!showSettings)}
-              className={`p-2 rounded-lg transition-colors ${
-                showSettings ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-100'
-              }`}
+              onClick={saveAndNew}
+              disabled={isLoading || !drillTitle.trim()}
+              className="hidden sm:flex items-center gap-2 px-3 py-2 text-blue-700 bg-blue-100 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-50 min-h-[44px]"
             >
-              <Settings className="w-5 h-5" />
-            </button>
-            <button
-              onClick={shareDrill}
-              className="hidden sm:flex items-center gap-2 px-3 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              <Share2 className="w-4 h-4" />
-              <span>Export</span>
+              <Plus className="w-4 h-4" />
+              Save & New
             </button>
             <button
               onClick={saveDrill}
-              disabled={isLoading}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+              disabled={isLoading || !drillTitle.trim()}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 min-h-[44px]"
             >
               <Save className="w-4 h-4" />
-              <span className="hidden sm:inline">{isLoading ? 'Saving...' : 'Save'}</span>
+              {isLoading ? 'Saving...' : 'Save'}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Settings Sidebar */}
-      <div className={`fixed top-16 right-0 w-80 h-full bg-white shadow-lg transform transition-transform z-40 ${
-        showSettings ? 'translate-x-0' : 'translate-x-full'
-      }`}>
-        <div className="p-4 border-b">
-          <h3 className="font-semibold text-gray-900">Drill Settings</h3>
-        </div>
-        
-        <div className="p-4 space-y-4 overflow-y-auto h-full pb-20">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Drill Name *
+      {/* Main Content - Scrollable */}
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+        {/* Metadata Panel - Above canvas on mobile, left side on desktop */}
+        <div className="bg-white border-b lg:border-r lg:border-b-0 p-4 lg:w-80 overflow-y-auto">
+          {/* Title - Large, prominent input */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Drill Title *
             </label>
             <input
               type="text"
-              value={drillName}
-              onChange={(e) => setDrillName(e.target.value)}
-              placeholder="e.g., 2-on-1 Rush Drill"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              value={drillTitle}
+              onChange={(e) => setDrillTitle(e.target.value)}
+              placeholder="e.g., 2-1 Breakout Drill"
+              className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px]"
+              autoFocus
             />
           </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Category
+
+          {/* Quick Tag Selection */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Quick Tags
             </label>
-            <select
-              value={drillCategory}
-              onChange={(e) => setDrillCategory(e.target.value as DrillCategory)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              {categories.map(category => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
+            <div className="grid grid-cols-2 gap-2">
+              {PREDEFINED_TAGS.map(tag => (
+                <button
+                  key={tag}
+                  onClick={() => toggleTag(tag)}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
+                    drillTags.includes(tag)
+                      ? 'bg-blue-100 text-blue-700 border-2 border-blue-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {tag}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+
+          {/* Selected Tags Display */}
+          {drillTags.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Selected Tags
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {drillTags.map(tag => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full"
+                  >
+                    {tag}
+                    <button
+                      onClick={() => removeTag(tag)}
+                      className="hover:text-blue-900 min-h-[24px] min-w-[24px]"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom Tag Input */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Custom Tag
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={customTag}
+                onChange={(e) => setCustomTag(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addCustomTag();
+                  }
+                }}
+                placeholder="Add custom tag..."
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px]"
+              />
+              <button
+                onClick={addCustomTag}
+                disabled={!customTag.trim() || drillTags.includes(customTag.trim())}
+                className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] min-w-[44px]"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Category & Duration Row */}
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Category
+              </label>
+              <select
+                value={drillCategory}
+                onChange={(e) => setDrillCategory(e.target.value as DrillCategory)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px]"
+              >
+                {categories.map(category => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Duration (min)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={drillDuration || ''}
+                  onChange={(e) => setDrillDuration(e.target.value ? parseInt(e.target.value) : null)}
+                  placeholder="5"
+                  min="1"
+                  max="60"
+                  className="w-full pl-3 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 min-h-[44px]"
+                />
+                <Clock className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+              </div>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Description
             </label>
             <textarea
               value={drillDescription}
               onChange={(e) => setDrillDescription(e.target.value)}
-              placeholder="Describe the drill setup and execution..."
-              rows={4}
+              placeholder="Describe the drill setup, execution, and key coaching points..."
+              rows={3}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
             />
           </div>
 
           {/* Stats */}
-          <div className="pt-4 border-t">
-            <h4 className="font-medium text-gray-900 mb-2">Statistics</h4>
-            <div className="text-sm text-gray-600 space-y-1">
-              <p>Elements: {drawingElements.length}</p>
-              <p>Selected: {selectedElements.length}</p>
-              <p>Tool: {selectedTool.replace('_', ' ')}</p>
-              <p>Color: {selectedColor}</p>
-            </div>
-          </div>
-
-          {/* Keyboard shortcuts */}
-          <div className="pt-4 border-t">
-            <h4 className="font-medium text-gray-900 mb-2">Keyboard Shortcuts</h4>
-            <div className="text-xs text-gray-600 space-y-1">
-              <p><kbd className="bg-gray-100 px-1 rounded">V</kbd> Select</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">A</kbd> Arrow</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">P</kbd> Pass</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">B</kbd> Backward</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">S</kbd> Shoot</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">D</kbd> Defense</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">O</kbd> Offense</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">X</kbd> Opponent</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">T</kbd> Text</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">Ctrl+Z</kbd> Undo</p>
-              <p><kbd className="bg-gray-100 px-1 rounded">Ctrl+S</kbd> Save</p>
+          <div className="pt-4 border-t text-sm text-gray-600">
+            <div className="grid grid-cols-2 gap-4">
+              <div>Elements: {drawingElements.length}</div>
+              <div>Selected: {selectedElements.length}</div>
+              <div>Tool: {selectedTool.replace('_', ' ')}</div>
+              <div>Color: {selectedColor}</div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Overlay */}
-      {showSettings && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-25 z-30"
-          onClick={() => setShowSettings(false)}
-        />
-      )}
+        {/* Canvas Area */}
+        <div className="flex-1 flex flex-col">
+          <div className="flex-1 p-4 min-h-0">
+            <div className="bg-white rounded-xl shadow-lg border h-full flex items-center justify-center">
+              <div className="relative max-w-full max-h-full">
+                <AdvancedDrawingCanvas
+                  elements={drawingElements}
+                  selectedTool={selectedTool}
+                  selectedColor={selectedColor}
+                  selectedElements={selectedElements}
+                  onElementsChange={handleElementsChange}
+                  onSelectionChange={setSelectedElements}
+                  onStartDrawing={handleStartDrawing}
+                  width={800}
+                  height={400}
+                  rinkImageSrc="/images/rink.png"
+                />
+                
+                {/* Element counter */}
+                {drawingElements.length > 0 && (
+                  <div className="absolute bottom-2 right-2 bg-white bg-opacity-90 text-gray-700 px-3 py-1 rounded-lg text-sm shadow-sm">
+                    {drawingElements.length} element{drawingElements.length !== 1 ? 's' : ''}
+                  </div>
+                )}
 
-      {/* Main Canvas Area */}
-      <div className="flex-1 p-4 pb-24">
-        <div className="bg-white rounded-xl shadow-lg border h-full flex items-center justify-center">
-          <div className="relative max-w-full max-h-full">
-            <AdvancedDrawingCanvas
-              elements={drawingElements}
+                {/* Current tool indicator */}
+                {selectedTool !== 'pointer' && (
+                  <div className="absolute top-2 left-2 bg-blue-600 text-white px-3 py-1 rounded-lg text-sm shadow-sm">
+                    {selectedTool.replace('_', ' ')} tool
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Professional Toolbar - Always at bottom */}
+          <div className="border-t">
+            <ProfessionalToolbar
               selectedTool={selectedTool}
               selectedColor={selectedColor}
-              selectedElements={selectedElements}
-              onElementsChange={handleElementsChange}
-              onSelectionChange={setSelectedElements}
-              onStartDrawing={handleStartDrawing}
-              width={800}
-              height={400}
-              rinkImageSrc="/images/rink.png"
+              onToolChange={setSelectedTool}
+              onColorChange={setSelectedColor}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              onClear={handleClear}
+              canUndo={canUndo}
+              canRedo={canRedo}
             />
-            
-            {/* Element counter */}
-            {drawingElements.length > 0 && (
-              <div className="absolute bottom-2 right-2 bg-white bg-opacity-90 text-gray-700 px-3 py-1 rounded-lg text-sm shadow-sm">
-                {drawingElements.length} element{drawingElements.length !== 1 ? 's' : ''}
-              </div>
-            )}
-
-            {/* Current tool indicator */}
-            {selectedTool !== 'pointer' && (
-              <div className="absolute top-2 left-2 bg-blue-600 text-white px-3 py-1 rounded-lg text-sm shadow-sm">
-                {selectedTool.replace('_', ' ')} tool active
-              </div>
-            )}
           </div>
         </div>
       </div>
-
-      {/* Professional Toolbar */}
-      <ProfessionalToolbar
-        selectedTool={selectedTool}
-        selectedColor={selectedColor}
-        onToolChange={setSelectedTool}
-        onColorChange={setSelectedColor}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        onClear={handleClear}
-        canUndo={canUndo}
-        canRedo={canRedo}
-      />
     </div>
   );
 };
