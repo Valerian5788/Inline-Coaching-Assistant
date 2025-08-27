@@ -9,6 +9,8 @@ const Teams: React.FC = () => {
   const [players, setPlayers] = useState<Player[]>([]);
   const [isCreateTeamOpen, setIsCreateTeamOpen] = useState(false);
   const [isCreatePlayerOpen, setIsCreatePlayerOpen] = useState(false);
+  const [isEditTeamOpen, setIsEditTeamOpen] = useState(false);
+  const [teamToEdit, setTeamToEdit] = useState<Team | null>(null);
   const [teamForm, setTeamForm] = useState({ name: '', shortName: '', color: '#3B82F6' });
   const [playerForm, setPlayerForm] = useState({
     firstName: '',
@@ -53,6 +55,50 @@ const Teams: React.FC = () => {
     setTeamForm({ name: '', shortName: '', color: '#3B82F6' });
     setIsCreateTeamOpen(false);
     loadTeams();
+  };
+
+  const handleEditTeam = (team: Team) => {
+    setTeamToEdit(team);
+    setTeamForm({ name: team.name, shortName: team.shortName, color: team.color });
+    setIsEditTeamOpen(true);
+  };
+
+  const handleUpdateTeam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teamToEdit) return;
+
+    await dbHelpers.updateTeam(teamToEdit.id, {
+      name: teamForm.name,
+      shortName: teamForm.shortName,
+      color: teamForm.color
+    });
+
+    setTeamForm({ name: '', shortName: '', color: '#3B82F6' });
+    setIsEditTeamOpen(false);
+    setTeamToEdit(null);
+    loadTeams();
+    
+    // Update selected team if it was the one being edited
+    if (selectedTeam?.id === teamToEdit.id) {
+      const updatedTeam = { ...teamToEdit, name: teamForm.name, shortName: teamForm.shortName, color: teamForm.color };
+      setSelectedTeamLocal(updatedTeam);
+      setSelectedTeam(updatedTeam);
+    }
+  };
+
+  const handleDeleteTeam = async (team: Team) => {
+    if (confirm(`Are you sure you want to delete "${team.name}"? This will also delete all players in this team.`)) {
+      await dbHelpers.deleteTeam(team.id);
+      
+      // Clear selected team if it was the one being deleted
+      if (selectedTeam?.id === team.id) {
+        setSelectedTeamLocal(null);
+        setSelectedTeam(null);
+        setPlayers([]);
+      }
+      
+      loadTeams();
+    }
   };
 
   const handleCreatePlayer = async (e: React.FormEvent) => {
@@ -106,14 +152,32 @@ const Teams: React.FC = () => {
                     : 'border-gray-200 hover:border-gray-300'
                 }`}
               >
-                <div className="flex items-center space-x-3">
-                  <div
-                    className="w-4 h-4 rounded-full"
-                    style={{ backgroundColor: team.color }}
-                  ></div>
-                  <div>
-                    <h3 className="font-semibold">{team.name}</h3>
-                    <p className="text-sm text-gray-600">{team.shortName}</p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div
+                      className="w-4 h-4 rounded-full"
+                      style={{ backgroundColor: team.color }}
+                    ></div>
+                    <div>
+                      <h3 className="font-semibold">{team.name}</h3>
+                      <p className="text-sm text-gray-600">{team.shortName}</p>
+                    </div>
+                  </div>
+                  <div className="flex space-x-2" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleEditTeam(team)}
+                      className="text-blue-500 hover:text-blue-700 p-1"
+                      title="Edit team"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTeam(team)}
+                      className="text-red-500 hover:text-red-700 p-1"
+                      title="Delete team"
+                    >
+                      🗑️
+                    </button>
                   </div>
                 </div>
               </div>
@@ -206,6 +270,66 @@ const Teams: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsCreateTeamOpen(false)}
+                  className="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Team Modal */}
+      {isEditTeamOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg w-96">
+            <h3 className="text-lg font-semibold mb-4">Edit Team</h3>
+            <form onSubmit={handleUpdateTeam}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Team Name</label>
+                <input
+                  type="text"
+                  value={teamForm.name}
+                  onChange={(e) => setTeamForm({ ...teamForm, name: e.target.value })}
+                  className="w-full p-2 border rounded"
+                  required
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Short Name</label>
+                <input
+                  type="text"
+                  value={teamForm.shortName}
+                  onChange={(e) => setTeamForm({ ...teamForm, shortName: e.target.value })}
+                  className="w-full p-2 border rounded"
+                  maxLength={4}
+                  required
+                />
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Team Color</label>
+                <input
+                  type="color"
+                  value={teamForm.color}
+                  onChange={(e) => setTeamForm({ ...teamForm, color: e.target.value })}
+                  className="w-full p-2 border rounded h-10"
+                />
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  type="submit"
+                  className="flex-1 bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                >
+                  Update
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditTeamOpen(false);
+                    setTeamToEdit(null);
+                    setTeamForm({ name: '', shortName: '', color: '#3B82F6' });
+                  }}
                   className="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
                 >
                   Cancel
