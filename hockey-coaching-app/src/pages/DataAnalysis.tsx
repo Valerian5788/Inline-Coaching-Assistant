@@ -33,18 +33,16 @@ const DataAnalysis: React.FC = () => {
     dateTo: ''
   });
 
-  const generateHeatmap = useCallback((shots: ShotWithGame[], type: 'shot' | 'goal') => {
+  const generateSplashZones = useCallback((shots: ShotWithGame[], type: 'shot' | 'goal') => {
     if (!canvasRef.current) return null;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    // Use current canvas dimensions
     const width = canvas.width;
     const height = canvas.height;
 
-    // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
     // Filter shots based on type
@@ -56,102 +54,130 @@ const DataAnalysis: React.FC = () => {
       return ctx.getImageData(0, 0, width, height);
     }
 
-    // Grid settings
-    const gridSize = 20;
-    const cols = Math.ceil(width / gridSize);
-    const rows = Math.ceil(height / gridSize);
+    // Group shots by proximity to create splash zones
+    interface SplashZone {
+      centerX: number;
+      centerY: number;
+      shots: ShotWithGame[];
+      efficiency: number;
+    }
     
-    // Create density grid
-    const densityGrid = new Array(rows).fill(0).map(() => new Array(cols).fill(0));
-    
-    // Count shots in each grid cell
-    relevantShots.forEach(shot => {
-      const col = Math.floor(shot.x * width / gridSize);
-      const row = Math.floor(shot.y * height / gridSize);
-      if (col >= 0 && col < cols && row >= 0 && row < rows) {
-        densityGrid[row][col]++;
+    const zones: SplashZone[] = [];
+    const radius = 30; // Base zone radius
+    const processed = new Set<number>();
+
+    relevantShots.forEach((shot, index) => {
+      if (processed.has(index)) return;
+
+      const centerX = shot.x * width;
+      const centerY = shot.y * height;
+      const zone: SplashZone = { centerX, centerY, shots: [shot], efficiency: 0 };
+
+      // Find nearby shots within radius
+      relevantShots.forEach((otherShot, otherIndex) => {
+        if (otherIndex === index || processed.has(otherIndex)) return;
+
+        const otherX = otherShot.x * width;
+        const otherY = otherShot.y * height;
+        const distance = Math.sqrt(Math.pow(centerX - otherX, 2) + Math.pow(centerY - otherY, 2));
+
+        if (distance <= radius) {
+          zone.shots.push(otherShot);
+          processed.add(otherIndex);
+        }
+      });
+
+      // Calculate zone efficiency (goals/shots ratio)
+      const goals = zone.shots.filter(s => s.result === 'goal').length;
+      zone.efficiency = zone.shots.length > 0 ? goals / zone.shots.length : 0;
+      
+      zones.push(zone);
+      processed.add(index);
+    });
+
+    // Sort zones by shot count for better rendering
+    zones.sort((a, b) => b.shots.length - a.shots.length);
+
+    // Render splash zones
+    zones.forEach(zone => {
+      const intensity = Math.min(zone.shots.length / 5, 1); // Normalize to max 5 shots
+      const zoneRadius = radius + (zone.shots.length * 5); // Larger zones for more shots
+
+      // Create radial gradient for splash effect
+      const gradient = ctx.createRadialGradient(
+        zone.centerX, zone.centerY, 0,
+        zone.centerX, zone.centerY, zoneRadius
+      );
+
+      // Color based on type and intensity
+      let r, g, b;
+      if (type === 'goal') {
+        // Goal zones: efficiency-based coloring
+        if (zone.efficiency >= 0.5) {
+          r = 34; g = 197; b = 94; // Green for high efficiency
+        } else if (zone.efficiency >= 0.25) {
+          r = 251; g = 191; b = 36; // Yellow for medium efficiency
+        } else {
+          r = 239; g = 68; b = 68; // Red for low efficiency
+        }
+      } else {
+        // Shot zones: heat-based coloring (blue to red)
+        if (intensity < 0.3) {
+          r = 59; g = 130; b = 246; // Blue - cold zones
+        } else if (intensity < 0.6) {
+          r = 34; g = 197; b = 94; // Green - warm zones
+        } else if (intensity < 0.8) {
+          r = 251; g = 191; b = 36; // Yellow - hot zones
+        } else {
+          r = 239; g = 68; b = 68; // Red - danger zones
+        }
+      }
+
+      gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.8 * intensity})`);
+      gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${0.4 * intensity})`);
+      gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(zone.centerX, zone.centerY, zoneRadius, 0, 2 * Math.PI);
+      ctx.fill();
+
+      // Add zone info text for larger zones
+      if (zone.shots.length >= 3) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        
+        if (type === 'goal') {
+          const goals = zone.shots.filter(s => s.result === 'goal').length;
+          ctx.fillText(
+            `${goals}/${zone.shots.length}`, 
+            zone.centerX, 
+            zone.centerY - 5
+          );
+          ctx.fillText(
+            `${(zone.efficiency * 100).toFixed(0)}%`, 
+            zone.centerX, 
+            zone.centerY + 10
+          );
+        } else {
+          ctx.fillText(
+            `${zone.shots.length} shots`, 
+            zone.centerX, 
+            zone.centerY - 5
+          );
+          ctx.fillText(
+            `${(zone.efficiency * 100).toFixed(0)}%`, 
+            zone.centerX, 
+            zone.centerY + 10
+          );
+        }
       }
     });
 
-    // Find max density for normalization
-    const maxDensity = Math.max(...densityGrid.flat());
-    if (maxDensity === 0) {
-      return ctx.getImageData(0, 0, width, height);
-    }
-
-    // Create heatmap
-    const imageData = ctx.createImageData(width, height);
-    const data = imageData.data;
-
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        const density = densityGrid[row][col];
-        if (density === 0) continue;
-
-        const intensity = density / maxDensity;
-        const startX = col * gridSize;
-        const startY = row * gridSize;
-        const endX = Math.min(startX + gridSize, width);
-        const endY = Math.min(startY + gridSize, height);
-
-        // Color based on type and intensity
-        let r, g, b;
-        if (type === 'goal') {
-          // White to yellow to red gradient for goals
-          if (intensity < 0.5) {
-            r = 255;
-            g = Math.floor(255 * (0.5 + intensity));
-            b = Math.floor(255 * (1 - intensity * 2));
-          } else {
-            r = 255;
-            g = Math.floor(255 * (2 - intensity * 2));
-            b = 0;
-          }
-        } else {
-          // Blue to green to yellow to red gradient for shots
-          if (intensity < 0.25) {
-            r = 0;
-            g = Math.floor(255 * intensity * 4);
-            b = 255;
-          } else if (intensity < 0.5) {
-            r = 0;
-            g = 255;
-            b = Math.floor(255 * (2 - intensity * 4));
-          } else if (intensity < 0.75) {
-            r = Math.floor(255 * (intensity * 4 - 2));
-            g = 255;
-            b = 0;
-          } else {
-            r = 255;
-            g = Math.floor(255 * (4 - intensity * 4));
-            b = 0;
-          }
-        }
-
-        // Fill the grid cell
-        for (let y = startY; y < endY; y++) {
-          for (let x = startX; x < endX; x++) {
-            const index = (y * width + x) * 4;
-            data[index] = r;     // Red
-            data[index + 1] = g; // Green
-            data[index + 2] = b; // Blue
-            data[index + 3] = Math.floor(255 * intensity * 0.7); // Alpha
-          }
-        }
-      }
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-
-    // Apply Gaussian blur for smoother zones
-    ctx.filter = 'blur(8px)';
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(canvas, 0, 0);
-    ctx.filter = 'none';
-    ctx.globalCompositeOperation = 'source-over';
-
     return ctx.getImageData(0, 0, width, height);
   }, []);
+
 
   useEffect(() => {
     loadInitialData();
@@ -163,7 +189,7 @@ const DataAnalysis: React.FC = () => {
     }
   }, [filters, loading]); // applyFilters is stable function
 
-  // Generate heatmap when view mode or data changes
+  // Generate heatmap/splash zones when view mode or data changes
   useEffect(() => {
     if (!canvasRef.current || viewMode === 'chart' || filteredShots.length === 0) return;
 
@@ -177,16 +203,16 @@ const DataAnalysis: React.FC = () => {
     canvas.height = Math.max(300, rect.height / 2);
 
     const type = viewMode === 'goal_heatmap' ? 'goal' : 'shot';
-    const heatmapData = generateHeatmap(filteredShots, type);
+    const visualizationData = generateSplashZones(filteredShots, type);
     
-    if (heatmapData && canvas) {
+    if (visualizationData && canvas) {
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.putImageData(heatmapData, 0, 0);
+        ctx.putImageData(visualizationData, 0, 0);
       }
     }
-  }, [viewMode, filteredShots, generateHeatmap]);
+  }, [viewMode, filteredShots, generateSplashZones]);
 
   const loadInitialData = async () => {
     try {
@@ -509,6 +535,7 @@ const DataAnalysis: React.FC = () => {
               </div>
             </div>
             
+            
             <div className="relative">
               {/* Rink Background */}
               <div
@@ -521,7 +548,7 @@ const DataAnalysis: React.FC = () => {
                   minHeight: '300px'
                 }}
               >
-                {/* Heatmap Canvas */}
+                {/* Splash Zone Canvas */}
                 {(viewMode === 'shot_heatmap' || viewMode === 'goal_heatmap') && (
                   <canvas
                     ref={canvasRef}
@@ -578,27 +605,46 @@ const DataAnalysis: React.FC = () => {
                 )}
                 
                 {viewMode === 'shot_heatmap' && (
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm font-medium">Cold</span>
-                    <div className="flex h-3 w-32 rounded-full overflow-hidden">
-                      <div className="w-1/4 bg-blue-500"></div>
-                      <div className="w-1/4 bg-green-500"></div>
-                      <div className="w-1/4 bg-yellow-500"></div>
-                      <div className="w-1/4 bg-red-500"></div>
+                  <div className="flex flex-col items-center space-y-2">
+                    <div className="flex items-center space-x-4">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+                        <span className="text-sm">Cold Zones</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded-full bg-green-500"></div>
+                        <span className="text-sm">Warm Zones</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded-full bg-yellow-500"></div>
+                        <span className="text-sm">Hot Zones</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded-full bg-red-500"></div>
+                        <span className="text-sm">Danger Zones</span>
+                      </div>
                     </div>
-                    <span className="text-sm font-medium">Hot</span>
+                    <div className="text-xs text-gray-500">Larger zones = more shots clustered</div>
                   </div>
                 )}
                 
                 {viewMode === 'goal_heatmap' && (
-                  <div className="flex items-center space-x-2">
-                    <span className="text-sm font-medium">Few Goals</span>
-                    <div className="flex h-3 w-32 rounded-full overflow-hidden">
-                      <div className="w-1/3 bg-white border"></div>
-                      <div className="w-1/3 bg-yellow-500"></div>
-                      <div className="w-1/3 bg-red-500"></div>
+                  <div className="flex flex-col items-center space-y-2">
+                    <div className="flex items-center space-x-4">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded-full bg-red-500"></div>
+                        <span className="text-sm">Low Efficiency (&lt;25%)</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded-full bg-yellow-500"></div>
+                        <span className="text-sm">Med Efficiency (25-50%)</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-4 h-4 rounded-full bg-green-500"></div>
+                        <span className="text-sm">High Efficiency (50%+)</span>
+                      </div>
                     </div>
-                    <span className="text-sm font-medium">Many Goals</span>
+                    <div className="text-xs text-gray-500">Shows goals/shots ratio in each zone</div>
                   </div>
                 )}
               </div>
