@@ -229,6 +229,28 @@ export interface PracticePlan {
   updatedAt: string;
 }
 
+// Enhanced practice plan item for better UX
+export interface PracticePlanItem {
+  id: string;
+  drillId?: string;
+  type: 'drill' | 'break' | 'scrimmage' | 'warm_up' | 'cool_down';
+  title: string;
+  duration: number; // in minutes
+  notes?: string;
+  order: number;
+}
+
+export interface EnhancedPracticePlan {
+  id: string;
+  name: string;
+  date: string;
+  items: PracticePlanItem[];
+  totalDuration: number; // computed from items
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface GamePreset {
   id: string;
   name: string;

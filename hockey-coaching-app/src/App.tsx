@@ -8,6 +8,7 @@ import Seasons from './pages/Seasons';
 import DataAnalysis from './pages/DataAnalysis';
 import Training from './pages/Training';
 import DrillDesigner from './pages/Training/DrillDesigner';
+import PracticePlanner from './pages/Training/PracticePlanner';
 import ShotTracking from './pages/LiveTracking/ShotTracking';
 import DrawPlay from './pages/LiveTracking/DrawPlay';
 import QuickStats from './pages/LiveTracking/QuickStats';
@@ -33,6 +34,8 @@ function App() {
         {/* Training subpages */}
         <Route path="/training/drill-designer" element={<DrillDesigner />} />
         <Route path="/training/drill-designer/:id" element={<DrillDesigner />} />
+        <Route path="/training/practice-planner" element={<PracticePlanner />} />
+        <Route path="/training/practice-planner/:id" element={<PracticePlanner />} />
       </Routes>
     </Router>
   );

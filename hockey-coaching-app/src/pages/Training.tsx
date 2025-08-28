@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Target, Edit, Trash2, Share2, Filter, Clock, Tag } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { dbHelpers } from '../db';
-import type { Drill } from '../types';
+import type { Drill, PracticePlan } from '../types';
 
 // Simple drill thumbnail component
 const DrillThumbnail: React.FC<{ drill: Drill }> = ({ drill }) => {
@@ -127,14 +127,17 @@ const DrillThumbnail: React.FC<{ drill: Drill }> = ({ drill }) => {
 
 const Training: React.FC = () => {
   const [drills, setDrills] = useState<Drill[]>([]);
+  const [practicePlans, setPracticePlans] = useState<PracticePlan[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'drills' | 'plans'>('drills');
 
   const categories = ['All', 'Shooting', 'Passing', 'Defense', 'Skating', 'Other'];
 
   useEffect(() => {
     loadDrills();
+    loadPracticePlans();
   }, []);
 
   const loadDrills = async () => {
@@ -150,6 +153,15 @@ const Training: React.FC = () => {
       setAllTags(Array.from(tagSet).sort());
     } catch (error) {
       console.error('Error loading drills:', error);
+    }
+  };
+
+  const loadPracticePlans = async () => {
+    try {
+      const loadedPlans = await dbHelpers.getAllPracticePlans();
+      setPracticePlans(loadedPlans);
+    } catch (error) {
+      console.error('Error loading practice plans:', error);
     }
   };
 
@@ -172,6 +184,18 @@ const Training: React.FC = () => {
       } catch (error) {
         console.error('Error deleting drill:', error);
         alert('Error deleting drill. Please try again.');
+      }
+    }
+  };
+
+  const deletePracticePlan = async (planId: string) => {
+    if (window.confirm('Delete this practice plan? This cannot be undone.')) {
+      try {
+        await dbHelpers.deletePracticePlan(planId);
+        setPracticePlans(prev => prev.filter(p => p.id !== planId));
+      } catch (error) {
+        console.error('Error deleting practice plan:', error);
+        alert('Error deleting practice plan. Please try again.');
       }
     }
   };
@@ -340,15 +364,45 @@ const Training: React.FC = () => {
             <Plus className="w-4 h-4" />
             New Drill
           </Link>
-          <button className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
+          <Link
+            to="/training/practice-planner"
+            className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+          >
             <Plus className="w-4 h-4" />
             New Practice Plan
-          </button>
+          </Link>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="space-y-4 mb-6">
+      {/* Tabs */}
+      <div className="border-b border-gray-200 mb-6">
+        <nav className="flex space-x-8">
+          <button
+            onClick={() => setActiveTab('drills')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'drills'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Drills ({drills.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('plans')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors ${
+              activeTab === 'plans'
+                ? 'border-green-500 text-green-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Practice Plans ({practicePlans.length})
+          </button>
+        </nav>
+      </div>
+
+      {/* Filters - Only show for drills tab */}
+      {activeTab === 'drills' && (
+        <div className="space-y-4 mb-6">
         {/* Category Filter */}
         <div className="flex flex-wrap items-center gap-2">
           <Filter className="w-5 h-5 text-gray-500 mr-1" />
@@ -402,10 +456,13 @@ const Training: React.FC = () => {
             )}
           </div>
         )}
-      </div>
+        </div>
+      )}
 
-      {/* Drills Grid */}
-      {filteredDrills.length === 0 ? (
+      {/* Content based on active tab */}
+      {activeTab === 'drills' ? (
+        // Drills Grid
+        filteredDrills.length === 0 ? (
         <div className="text-center py-12">
           <Target className="w-16 h-16 text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -502,6 +559,85 @@ const Training: React.FC = () => {
             </div>
           ))}
         </div>
+      )
+      ) : (
+        // Practice Plans Grid
+        practicePlans.length === 0 ? (
+          <div className="text-center py-12">
+            <Target className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              No practice plans yet
+            </h3>
+            <p className="text-gray-600 mb-4">
+              Start by creating your first practice plan to organize your training sessions
+            </p>
+            <Link
+              to="/training/practice-planner"
+              className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Create First Practice Plan
+            </Link>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {practicePlans.map(plan => (
+              <div key={plan.id} className="bg-white rounded-lg border shadow-sm hover:shadow-md transition-shadow">
+                {/* Practice Plan Header */}
+                <div className="p-4 border-b">
+                  <div className="flex justify-between items-start mb-2">
+                    <h3 className="font-medium text-gray-900 truncate">
+                      {plan.name}
+                    </h3>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {plan.duration}m
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="text-sm text-gray-600">
+                    {new Date(plan.date).toLocaleDateString()}
+                  </div>
+                  
+                  {plan.drillIds.length > 0 && (
+                    <div className="mt-2">
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                        {plan.drillIds.length} drill{plan.drillIds.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {plan.notes && (
+                    <p className="text-gray-600 text-sm mt-2 line-clamp-2">
+                      {plan.notes}
+                    </p>
+                  )}
+                </div>
+                
+                {/* Action Buttons */}
+                <div className="p-3">
+                  <div className="flex gap-1">
+                    <Link
+                      to={`/training/practice-planner/${plan.id}`}
+                      className="flex-1 flex items-center justify-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1.5 rounded text-xs transition-colors"
+                    >
+                      <Edit className="w-3 h-3" />
+                      Edit
+                    </Link>
+                    <button
+                      onClick={() => deletePracticePlan(plan.id)}
+                      className="flex items-center justify-center bg-red-100 hover:bg-red-200 text-red-700 px-2 py-1.5 rounded text-xs transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );
