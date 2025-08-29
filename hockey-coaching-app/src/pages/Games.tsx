@@ -4,6 +4,7 @@ import type { Game, Team, Season, RinkSide, GamePreset } from '../types';
 import { dbHelpers } from '../db';
 import { useAppStore } from '../stores/appStore';
 import { useGameStore } from '../stores/gameStore';
+import { useUIStore } from '../stores/uiStore';
 import { 
   Calendar, 
   Plus, 
@@ -18,7 +19,9 @@ import {
   ArrowRight,
   Zap,
   Edit,
-  X
+  X,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 const Games: React.FC = () => {
@@ -75,6 +78,15 @@ const Games: React.FC = () => {
 
   const { currentSeason } = useAppStore();
   const { initializeLiveGame } = useGameStore();
+  const { 
+    isCreateGameExpanded, 
+    isFiltersExpanded, 
+    activeFilterCount,
+    toggleCreateGame, 
+    toggleFilters,
+    setCreateGameExpanded,
+    setActiveFilterCount
+  } = useUIStore();
 
   useEffect(() => {
     loadData();
@@ -90,6 +102,19 @@ const Games: React.FC = () => {
   useEffect(() => {
     applyFilters();
   }, [games, filters]);
+
+  useEffect(() => {
+    // Set create game section collapsed if games exist
+    if (games.length > 0 && isCreateGameExpanded) {
+      setCreateGameExpanded(false);
+    }
+  }, [games.length]);
+
+  useEffect(() => {
+    // Calculate active filter count
+    const count = Object.values(filters).filter(value => value !== '').length;
+    setActiveFilterCount(count);
+  }, [filters, setActiveFilterCount]);
 
   const loadData = async () => {
     try {
@@ -588,154 +613,242 @@ const Games: React.FC = () => {
         </button>
       </div>
 
-      {/* Quick Game Templates */}
-      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-        <div className="flex items-center space-x-2 mb-4">
-          <Zap className="w-5 h-5 text-blue-600" />
-          <h3 className="font-semibold text-lg">Quick Game</h3>
+      {/* Collapsible Create Game Section */}
+      <div className="bg-white rounded-lg shadow-md mb-6 overflow-hidden transition-all duration-200">
+        <div 
+          className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+          onClick={toggleCreateGame}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              toggleCreateGame();
+            }
+          }}
+          aria-expanded={isCreateGameExpanded}
+          aria-controls="create-game-content"
+        >
+          <div className="flex items-center space-x-2">
+            <Zap className="w-5 h-5 text-blue-600" />
+            <h3 className="font-semibold text-lg">Create New Game</h3>
+          </div>
+          <div className="flex items-center space-x-2">
+            {isCreateGameExpanded ? (
+              <ChevronUp 
+                className="w-5 h-5 text-gray-600 transition-transform duration-200" 
+                style={{ minWidth: '44px', minHeight: '44px', padding: '12px' }}
+              />
+            ) : (
+              <ChevronDown 
+                className="w-5 h-5 text-gray-600 transition-transform duration-200" 
+                style={{ minWidth: '44px', minHeight: '44px', padding: '12px' }}
+              />
+            )}
+          </div>
         </div>
-        <div className="flex justify-between items-center mb-4">
-          <div></div>
-          <button
-            onClick={() => {
-              setPresetToEdit(null);
-              setPresetForm({ name: '', periods: 2, periodMinutes: 20, hasOvertime: false, overtimeMinutes: 5 });
-              setShowEditPresetModal(true);
-            }}
-            className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center space-x-1"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Create New Preset</span>
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {gamePresets.map((preset) => (
-            <div key={preset.id} className="relative group">
+        
+        <div 
+          id="create-game-content"
+          className={`transition-all duration-200 ease-in-out overflow-hidden ${
+            isCreateGameExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
+          }`}
+        >
+          <div className="px-6 pb-6">
+            <div className="flex justify-between items-center mb-4">
+              <div></div>
               <button
-                onClick={() => openPresetModal(preset)}
-                className={`w-full ${
-                  preset.name === 'Senior Game' ? 'bg-green-500 hover:bg-green-600' :
-                  preset.name === 'Junior Game' ? 'bg-blue-500 hover:bg-blue-600' :
-                  'bg-purple-500 hover:bg-purple-600'
-                } text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors`}
+                onClick={() => {
+                  setPresetToEdit(null);
+                  setPresetForm({ name: '', periods: 2, periodMinutes: 20, hasOvertime: false, overtimeMinutes: 5 });
+                  setShowEditPresetModal(true);
+                }}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center space-x-1"
               >
-                {preset.name === 'Senior Game' ? <Play className="w-6 h-6" /> :
-                 preset.name === 'Junior Game' ? <Clock className="w-6 h-6" /> :
-                 <Zap className="w-6 h-6" />}
-                <span className="text-lg">{preset.name}</span>
-                <span className="text-sm opacity-90">
-                  {preset.periods} × {preset.periodMinutes} min{preset.hasOvertime ? ' + OT' : ''}
-                </span>
+                <Plus className="w-4 h-4" />
+                <span>Create New Preset</span>
               </button>
-              <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openEditPresetModal(preset);
-                  }}
-                  className="bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-1 rounded shadow-sm"
-                  title="Edit preset"
-                >
-                  <Edit className="w-3 h-3" />
-                </button>
-                {!preset.isDefault && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deletePreset(preset);
-                    }}
-                    className="bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-1 rounded shadow-sm"
-                    title="Delete preset"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
             </div>
-          ))}
-          <button
-            onClick={() => setIsCreateOpen(true)}
-            className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
-          >
-            <Plus className="w-6 h-6" />
-            <span className="text-lg">Custom Game</span>
-            <span className="text-sm opacity-90">Full settings</span>
-          </button>
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {gamePresets.map((preset) => (
+                <div key={preset.id} className="relative group">
+                  <button
+                    onClick={() => openPresetModal(preset)}
+                    className={`w-full ${
+                      preset.name === 'Senior Game' ? 'bg-green-500 hover:bg-green-600' :
+                      preset.name === 'Junior Game' ? 'bg-blue-500 hover:bg-blue-600' :
+                      'bg-purple-500 hover:bg-purple-600'
+                    } text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors`}
+                  >
+                    {preset.name === 'Senior Game' ? <Play className="w-6 h-6" /> :
+                     preset.name === 'Junior Game' ? <Clock className="w-6 h-6" /> :
+                     <Zap className="w-6 h-6" />}
+                    <span className="text-lg">{preset.name}</span>
+                    <span className="text-sm opacity-90">
+                      {preset.periods} × {preset.periodMinutes} min{preset.hasOvertime ? ' + OT' : ''}
+                    </span>
+                  </button>
+                  <div className="absolute top-2 right-2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditPresetModal(preset);
+                      }}
+                      className="bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-1 rounded shadow-sm"
+                      title="Edit preset"
+                    >
+                      <Edit className="w-3 h-3" />
+                    </button>
+                    {!preset.isDefault && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deletePreset(preset);
+                        }}
+                        className="bg-black bg-opacity-50 hover:bg-opacity-70 text-white p-1 rounded shadow-sm"
+                        title="Delete preset"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <button
+                onClick={() => setIsCreateOpen(true)}
+                className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-4 px-6 rounded-lg flex flex-col items-center space-y-2 transition-colors"
+              >
+                <Plus className="w-6 h-6" />
+                <span className="text-lg">Custom Game</span>
+                <span className="text-sm opacity-90">Full settings</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-        <div className="flex items-center space-x-2 mb-4">
-          <Filter className="w-4 h-4" />
-          <h3 className="font-semibold">Filters</h3>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">Team</label>
-            <select
-              value={filters.team}
-              onChange={(e) => setFilters({ ...filters, team: e.target.value })}
-              className="w-full p-2 border rounded"
-            >
-              <option value="">All Teams</option>
-              {teams.map(team => (
-                <option key={team.id} value={team.id}>{team.name}</option>
-              ))}
-            </select>
+      {/* Collapsible Filters Section */}
+      <div className="bg-white rounded-lg shadow-md mb-6 overflow-hidden transition-all duration-200">
+        <div 
+          className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+          onClick={toggleFilters}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              toggleFilters();
+            }
+          }}
+          aria-expanded={isFiltersExpanded}
+          aria-controls="filters-content"
+        >
+          <div className="flex items-center space-x-2">
+            <div className="relative">
+              <Filter className="w-5 h-5 text-gray-600" />
+              {activeFilterCount > 0 && (
+                <span className="absolute -top-2 -right-2 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">
+                  {activeFilterCount}
+                </span>
+              )}
+            </div>
+            <h3 className="font-semibold text-lg">Filters</h3>
+            {activeFilterCount > 0 && (
+              <span className="text-sm text-blue-600 font-medium">
+                ({activeFilterCount} active)
+              </span>
+            )}
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Season</label>
-            <select
-              value={filters.season}
-              onChange={(e) => setFilters({ ...filters, season: e.target.value })}
-              className="w-full p-2 border rounded"
-            >
-              <option value="">All Seasons</option>
-              {seasons.map(season => (
-                <option key={season.id} value={season.id}>{season.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Status</label>
-            <select
-              value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-              className="w-full p-2 border rounded"
-            >
-              <option value="">All Statuses</option>
-              <option value="planned">Planned</option>
-              <option value="live">Live</option>
-              <option value="archived">Archived</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">From Date</label>
-            <input
-              type="date"
-              value={filters.dateFrom}
-              onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
-              className="w-full p-2 border rounded"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">To Date</label>
-            <input
-              type="date"
-              value={filters.dateTo}
-              onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
-              className="w-full p-2 border rounded"
-            />
+          <div className="flex items-center space-x-2">
+            {isFiltersExpanded ? (
+              <ChevronUp 
+                className="w-5 h-5 text-gray-600 transition-transform duration-200" 
+                style={{ minWidth: '44px', minHeight: '44px', padding: '12px' }}
+              />
+            ) : (
+              <ChevronDown 
+                className="w-5 h-5 text-gray-600 transition-transform duration-200" 
+                style={{ minWidth: '44px', minHeight: '44px', padding: '12px' }}
+              />
+            )}
           </div>
         </div>
-        <div className="mt-4">
-          <button
-            onClick={() => setFilters({ team: '', season: '', status: '', dateFrom: '', dateTo: '' })}
-            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-          >
-            Clear Filters
-          </button>
+        
+        <div 
+          id="filters-content"
+          className={`transition-all duration-200 ease-in-out overflow-hidden ${
+            isFiltersExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
+          }`}
+        >
+          <div className="px-6 pb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2">Team</label>
+                <select
+                  value={filters.team}
+                  onChange={(e) => setFilters({ ...filters, team: e.target.value })}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="">All Teams</option>
+                  {teams.map(team => (
+                    <option key={team.id} value={team.id}>{team.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Season</label>
+                <select
+                  value={filters.season}
+                  onChange={(e) => setFilters({ ...filters, season: e.target.value })}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="">All Seasons</option>
+                  {seasons.map(season => (
+                    <option key={season.id} value={season.id}>{season.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Status</label>
+                <select
+                  value={filters.status}
+                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                  className="w-full p-2 border rounded"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="planned">Planned</option>
+                  <option value="live">Live</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">From Date</label>
+                <input
+                  type="date"
+                  value={filters.dateFrom}
+                  onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">To Date</label>
+                <input
+                  type="date"
+                  value={filters.dateTo}
+                  onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={() => setFilters({ team: '', season: '', status: '', dateFrom: '', dateTo: '' })}
+                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+              >
+                Clear Filters
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

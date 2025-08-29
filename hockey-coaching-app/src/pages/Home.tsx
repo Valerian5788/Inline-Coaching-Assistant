@@ -5,11 +5,16 @@ import { dbHelpers } from '../db';
 import type { Game, Team } from '../types';
 import { 
   Calendar, 
-  TrendingUp, 
   Users, 
   Play,
-  Plus,
-  Zap
+  Zap,
+  Clock,
+  Target,
+  MapPin,
+  Trophy,
+  Activity,
+  CalendarDays,
+  BarChart3
 } from 'lucide-react';
 
 interface GameStats {
@@ -18,6 +23,28 @@ interface GameStats {
   totalGoals: number;
   avgShotsPerGame: number;
   bestShootingPercentage: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  gamesThisWeek: number;
+  recentForm: string[];
+}
+
+interface RecentActivity {
+  id: string;
+  type: 'game' | 'drill' | 'player';
+  title: string;
+  description: string;
+  timestamp: string;
+  action?: () => void;
+}
+
+interface UpcomingGame {
+  id: string;
+  opponent: string;
+  date: Date;
+  time: string;
+  location?: string;
 }
 
 const Home: React.FC = () => {
@@ -26,7 +53,18 @@ const Home: React.FC = () => {
   const [lastGame, setLastGame] = useState<Game | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [seasonStats, setSeasonStats] = useState<GameStats | null>(null);
+  const [upcomingGame, setUpcomingGame] = useState<UpcomingGame | null>(null);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 60000); // Update every minute
+    
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     loadDashboardData();
@@ -51,6 +89,25 @@ const Home: React.FC = () => {
         const lastArchivedGame = seasonGames.find(game => game.status === 'archived');
         setLastGame(lastArchivedGame || null);
         
+        // Find upcoming game (next planned game)
+        const upcomingGames = seasonGames
+          .filter(game => game.status === 'planned' && new Date(game.date) >= new Date())
+          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        
+        if (upcomingGames.length > 0) {
+          const nextGame = upcomingGames[0];
+          const gameDate = new Date(nextGame.date);
+          setUpcomingGame({
+            id: nextGame.id,
+            opponent: nextGame.awayTeamName,
+            date: gameDate,
+            time: gameDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
+            location: 'Home Arena' // Could be enhanced with location field
+          });
+        } else {
+          setUpcomingGame(null);
+        }
+
         // Calculate season stats
         const archivedGames = seasonGames.filter(game => game.status === 'archived');
         if (archivedGames.length > 0) {
@@ -60,17 +117,70 @@ const Home: React.FC = () => {
           const flatShots = allShots.flat();
           const totalShots = flatShots.length;
           const totalGoals = flatShots.filter(shot => shot.result === 'goal').length;
+
+          // Calculate wins/losses/ties
+          let wins = 0, losses = 0, ties = 0;
+          archivedGames.forEach(game => {
+            if ((game.homeScore ?? 0) > (game.awayScore ?? 0)) wins++;
+            else if ((game.homeScore ?? 0) < (game.awayScore ?? 0)) losses++;
+            else ties++;
+          });
+
+          // Games this week
+          const weekStart = new Date();
+          weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+          weekStart.setHours(0, 0, 0, 0);
+          const gamesThisWeek = archivedGames.filter(game => 
+            new Date(game.date) >= weekStart
+          ).length;
+
+          // Recent form (last 5 games)
+          const recentGames = archivedGames
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 5);
+          const recentForm = recentGames.map(game => 
+            (game.homeScore ?? 0) > (game.awayScore ?? 0) ? 'W' :
+            (game.homeScore ?? 0) < (game.awayScore ?? 0) ? 'L' : 'T'
+          );
           
           setSeasonStats({
             totalGames: archivedGames.length,
             totalShots,
             totalGoals,
             avgShotsPerGame: totalShots / archivedGames.length,
-            bestShootingPercentage: totalShots > 0 ? (totalGoals / totalShots) * 100 : 0
+            bestShootingPercentage: totalShots > 0 ? (totalGoals / totalShots) * 100 : 0,
+            wins,
+            losses,
+            ties,
+            gamesThisWeek,
+            recentForm
           });
         } else {
           setSeasonStats(null);
         }
+        
+        // Build recent activity
+        const activities: RecentActivity[] = [];
+        
+        // Add recent games
+        const recentGames = archivedGames
+          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+          .slice(0, 3);
+        
+        recentGames.forEach(game => {
+          const result = (game.homeScore ?? 0) > (game.awayScore ?? 0) ? 'Won' :
+                        (game.homeScore ?? 0) < (game.awayScore ?? 0) ? 'Lost' : 'Tied';
+          activities.push({
+            id: game.id,
+            type: 'game',
+            title: `${result} vs ${game.awayTeamName}`,
+            description: `${game.homeScore ?? 0}-${game.awayScore ?? 0} • ${formatDate(game.date)}`,
+            timestamp: game.date,
+            action: () => navigate('/games')
+          });
+        });
+
+        setRecentActivity(activities);
       }
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -79,7 +189,7 @@ const Home: React.FC = () => {
     }
   };
 
-  const createQuickGame = async (periods: number, periodMinutes: number) => {
+  const createQuickGame = async () => {
     if (!currentSeason || teams.length === 0) {
       alert('Please create a team and season first');
       return;
@@ -95,8 +205,8 @@ const Home: React.FC = () => {
       date: gameDateTime,
       status: 'planned',
       seasonId: currentSeason.id,
-      periods,
-      periodMinutes,
+      periods: 2,
+      periodMinutes: 25,
       hasOvertime: true,
       homeScore: 0,
       awayScore: 0
@@ -106,12 +216,60 @@ const Home: React.FC = () => {
     navigate('/games');
   };
 
+  const startQuickPractice = async () => {
+    if (!currentSeason || teams.length === 0) {
+      alert('Please create a team and season first');
+      return;
+    }
+
+    const now = new Date();
+    const gameDateTime = now.toISOString();
+    
+    const practiceGame: Game = {
+      id: crypto.randomUUID(),
+      homeTeamId: teams[0].id,
+      awayTeamName: `Practice Session`,
+      date: gameDateTime,
+      status: 'planned',
+      seasonId: currentSeason.id,
+      periods: 1,
+      periodMinutes: 60,
+      hasOvertime: false,
+      homeScore: 0,
+      awayScore: 0
+    };
+
+    await dbHelpers.createGame(practiceGame);
+    navigate('/games');
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric'
     });
+  };
+
+  const formatGreeting = () => {
+    const hour = currentTime.getHours();
+    const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+    return `${greeting}, Coach!`;
+  };
+
+  const formatCurrentDate = () => {
+    return currentTime.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const isToday = (dateString: string) => {
+    const today = new Date();
+    const date = new Date(dateString);
+    return today.toDateString() === date.toDateString();
   };
 
   const getTeamName = (teamId: string) => {
@@ -171,80 +329,233 @@ const Home: React.FC = () => {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Dashboard</h1>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        {/* Last Game Summary */}
-        <div className="bg-white rounded-lg shadow-md p-6">
+      {/* Header Section */}
+      <div className="mb-8">
+        <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-2">
+          {formatGreeting()}
+        </h1>
+        <p className="text-lg text-gray-600 mb-4">
+          {formatCurrentDate()}
+        </p>
+        {teams.length > 0 && (
+          <p className="text-blue-600 font-medium">
+            Coaching {teams[0].name}
+            {currentSeason && ` • ${currentSeason.name}`}
+          </p>
+        )}
+      </div>
+
+      {/* Quick Actions Section */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <button
+          onClick={createQuickGame}
+          className="bg-green-500 hover:bg-green-600 text-white font-bold py-6 px-4 rounded-lg flex flex-col items-center space-y-3 transition-all transform hover:scale-105 min-h-[120px] touch-action-manipulation"
+          style={{ minWidth: '100px', minHeight: '100px' }}
+        >
+          <Play className="w-8 h-8" />
+          <span className="text-lg text-center">Start Game</span>
+        </button>
+        
+        <button
+          onClick={startQuickPractice}
+          className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-6 px-4 rounded-lg flex flex-col items-center space-y-3 transition-all transform hover:scale-105 min-h-[120px] touch-action-manipulation"
+          style={{ minWidth: '100px', minHeight: '100px' }}
+        >
+          <Target className="w-8 h-8" />
+          <span className="text-lg text-center">Quick Practice</span>
+        </button>
+        
+        <button
+          onClick={() => navigate('/games')}
+          className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-6 px-4 rounded-lg flex flex-col items-center space-y-3 transition-all transform hover:scale-105 min-h-[120px] touch-action-manipulation"
+          style={{ minWidth: '100px', minHeight: '100px' }}
+        >
+          <Calendar className="w-8 h-8" />
+          <span className="text-lg text-center">View Schedule</span>
+        </button>
+        
+        <button
+          onClick={() => navigate('/drills')}
+          className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-6 px-4 rounded-lg flex flex-col items-center space-y-3 transition-all transform hover:scale-105 min-h-[120px] touch-action-manipulation"
+          style={{ minWidth: '100px', minHeight: '100px' }}
+        >
+          <Zap className="w-8 h-8" />
+          <span className="text-lg text-center">Design Drill</span>
+        </button>
+      </div>
+      {/* Today's Overview */}
+      {(upcomingGame && isToday(upcomingGame.date.toISOString())) || (lastGame && isToday(lastGame.date)) ? (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <div className="flex items-center space-x-2 mb-4">
-            <Calendar className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-semibold">Last Game</h2>
+            <CalendarDays className="w-5 h-5 text-blue-600" />
+            <h2 className="text-xl font-semibold">Today's Overview</h2>
           </div>
-          {lastGame ? (
-            <div>
-              <div className="text-lg font-medium mb-2">
-                {getTeamName(lastGame.homeTeamId)} vs {lastGame.awayTeamName}
+          
+          {upcomingGame && isToday(upcomingGame.date.toISOString()) && (
+            <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center space-x-2 mb-2">
+                <Clock className="w-4 h-4 text-blue-600" />
+                <h3 className="font-medium text-blue-800">Upcoming Game</h3>
               </div>
-              <div className="text-2xl font-bold text-blue-600 mb-1">
-                {lastGame.homeScore} - {lastGame.awayScore}
-              </div>
-              <div className="text-sm text-gray-600">
-                {formatDate(lastGame.date)}
-              </div>
+              <p className="text-lg font-semibold">{upcomingGame.time} vs {upcomingGame.opponent}</p>
+              {upcomingGame.location && (
+                <div className="flex items-center space-x-1 mt-1">
+                  <MapPin className="w-4 h-4 text-gray-500" />
+                  <span className="text-sm text-gray-600">{upcomingGame.location}</span>
+                </div>
+              )}
             </div>
-          ) : (
-            <p className="text-gray-600">No games completed yet</p>
+          )}
+          
+          {lastGame && isToday(lastGame.date) && (
+            <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+              <div className="flex items-center space-x-2 mb-2">
+                <Trophy className="w-4 h-4 text-green-600" />
+                <h3 className="font-medium text-green-800">Game Completed</h3>
+              </div>
+              <p className="text-lg font-semibold">
+                {getTeamName(lastGame.homeTeamId)} {lastGame.homeScore} - {lastGame.awayScore} {lastGame.awayTeamName}
+              </p>
+            </div>
           )}
         </div>
-
-        {/* Season Stats */}
+      ) : null}
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {/* Quick Stats Dashboard */}
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="flex items-center space-x-2 mb-4">
-            <TrendingUp className="w-5 h-5 text-green-600" />
-            <h2 className="text-xl font-semibold">Season Stats</h2>
+            <BarChart3 className="w-5 h-5 text-green-600" />
+            <h2 className="text-xl font-semibold">This Week</h2>
           </div>
           {seasonStats ? (
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Games:</span>
-                <span className="font-semibold">{seasonStats.totalGames}</span>
+            <div className="text-center">
+              <div className="text-3xl font-bold text-green-600 mb-1">
+                {seasonStats.gamesThisWeek}
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Avg Shots/Game:</span>
-                <span className="font-semibold">{seasonStats.avgShotsPerGame.toFixed(1)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Shooting %:</span>
-                <span className="font-semibold text-green-600">{seasonStats.bestShootingPercentage.toFixed(1)}%</span>
+              <div className="text-sm text-gray-600">
+                Games Played
               </div>
             </div>
           ) : (
-            <p className="text-gray-600">Complete a game to see stats</p>
+            <p className="text-gray-600 text-center">No games this week</p>
           )}
         </div>
 
-        {/* Quick Actions */}
+        {/* Season Record */}
         <div className="bg-white rounded-lg shadow-md p-6">
           <div className="flex items-center space-x-2 mb-4">
-            <Zap className="w-5 h-5 text-purple-600" />
-            <h2 className="text-xl font-semibold">Quick Actions</h2>
+            <Trophy className="w-5 h-5 text-yellow-600" />
+            <h2 className="text-xl font-semibold">Season Record</h2>
           </div>
-          <div className="space-y-2">
-            <button
-              onClick={() => createQuickGame(2, 25)}
-              className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded flex items-center justify-center space-x-2"
-            >
-              <Play className="w-4 h-4" />
-              <span>Start Quick Game</span>
-            </button>
-            <button
-              onClick={() => navigate('/games')}
-              className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded flex items-center justify-center space-x-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span>All Games</span>
-            </button>
+          {seasonStats && seasonStats.totalGames > 0 ? (
+            <div className="text-center">
+              <div className="text-2xl font-bold text-blue-600 mb-1">
+                {seasonStats.wins}-{seasonStats.losses}-{seasonStats.ties}
+              </div>
+              <div className="text-sm text-gray-600">
+                W-L-T Record
+              </div>
+            </div>
+          ) : (
+            <p className="text-gray-600 text-center">No games completed</p>
+          )}
+        </div>
+
+        {/* Team Shooting % */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="flex items-center space-x-2 mb-4">
+            <Target className="w-5 h-5 text-blue-600" />
+            <h2 className="text-xl font-semibold">Shooting %</h2>
           </div>
+          {seasonStats && seasonStats.totalShots > 0 ? (
+            <div className="text-center">
+              <div className="text-3xl font-bold text-blue-600 mb-1">
+                {seasonStats.bestShootingPercentage.toFixed(1)}%
+              </div>
+              <div className="text-sm text-gray-600">
+                Season Average
+              </div>
+            </div>
+          ) : (
+            <p className="text-gray-600 text-center">No shots recorded</p>
+          )}
+        </div>
+        
+        {/* Recent Form */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="flex items-center space-x-2 mb-4">
+            <Activity className="w-5 h-5 text-purple-600" />
+            <h2 className="text-xl font-semibold">Recent Form</h2>
+          </div>
+          {seasonStats && seasonStats.recentForm.length > 0 ? (
+            <div className="flex justify-center space-x-1">
+              {seasonStats.recentForm.map((result, index) => (
+                <span
+                  key={index}
+                  className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm ${
+                    result === 'W' ? 'bg-green-500' :
+                    result === 'L' ? 'bg-red-500' : 'bg-gray-500'
+                  }`}
+                >
+                  {result}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-600 text-center">No recent games</p>
+          )}
+        </div>
+      </div>
+      
+      {/* Recent Activity Feed */}
+      {recentActivity.length > 0 && (
+        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+          <div className="flex items-center space-x-2 mb-4">
+            <Clock className="w-5 h-5 text-gray-600" />
+            <h2 className="text-xl font-semibold">Recent Activity</h2>
+          </div>
+          <div className="space-y-3">
+            {recentActivity.map((activity) => (
+              <div 
+                key={activity.id} 
+                className={`flex items-center space-x-3 p-3 rounded-lg border hover:bg-gray-50 ${
+                  activity.action ? 'cursor-pointer' : ''
+                }`}
+                onClick={activity.action}
+              >
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  activity.type === 'game' ? 'bg-blue-100' :
+                  activity.type === 'drill' ? 'bg-green-100' : 'bg-purple-100'
+                }`}>
+                  {activity.type === 'game' ? (
+                    <Play className={`w-5 h-5 ${
+                      activity.type === 'game' ? 'text-blue-600' :
+                      activity.type === 'drill' ? 'text-green-600' : 'text-purple-600'
+                    }`} />
+                  ) : activity.type === 'drill' ? (
+                    <Zap className="w-5 h-5 text-green-600" />
+                  ) : (
+                    <Users className="w-5 h-5 text-purple-600" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-gray-900">{activity.title}</p>
+                  <p className="text-sm text-gray-600">{activity.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* Motivational Section */}
+      <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-6 border border-gray-200">
+        <div className="text-center">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">💡 Coaching Tip</h3>
+          <p className="text-gray-700 italic">
+            "Track shots by zone to identify offensive patterns and improve your team's scoring opportunities."
+          </p>
         </div>
       </div>
     </div>

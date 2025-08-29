@@ -1,25 +1,33 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import type { Team, Season, Game, AnalysisFilters, ShotWithGame, ZoneStats, GameStats } from '../types';
+import type { Team, Season, Game, AnalysisFilters, ShotWithGame } from '../types';
 import { dbHelpers } from '../db';
 import { 
   getFilteredShots, 
   getFilteredGames, 
-  calculateZoneStats, 
+  getFilteredNormalizedShots,
+  getFilteredGoalsAgainst,
+  calculateNormalizedZoneStats,
   calculateGameStats, 
   getZoneDisplayName, 
-  getShotColor,
-  getRinkZone
+  getEnhancedShotColor
 } from '../lib/utils/analysis';
-import { Filter, Target, TrendingUp, Calendar, Users, RotateCcw } from 'lucide-react';
+import { 
+  generateSmartInsights, 
+  getNormalizedRinkZone,
+  type NormalizedShotWithGame,
+  type NormalizedGoalAgainst
+} from '../utils/shotNormalization';
+import { Filter, Target, TrendingUp, Calendar, Users, RotateCcw, Shield, Crosshair } from 'lucide-react';
 
 const DataAnalysis: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [filteredShots, setFilteredShots] = useState<ShotWithGame[]>([]);
+  const [normalizedShots, setNormalizedShots] = useState<NormalizedShotWithGame[]>([]);
+  const [normalizedGoalsAgainst, setNormalizedGoalsAgainst] = useState<NormalizedGoalAgainst[]>([]);
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
-  const [zoneStats, setZoneStats] = useState<ZoneStats[]>([]);
-  const [gameStats, setGameStats] = useState<GameStats | null>(null);
+  // Removed: zoneStats, gameStats, and smartInsights are now memoized
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'chart' | 'shot_heatmap' | 'goal_heatmap'>('chart');
 
@@ -33,7 +41,55 @@ const DataAnalysis: React.FC = () => {
     dateTo: ''
   });
 
-  const generateSplashZones = useCallback((shots: ShotWithGame[], type: 'shot' | 'goal') => {
+  // Memoized calculations for performance
+  const memoizedZoneStats = useMemo(() => {
+    return calculateNormalizedZoneStats(normalizedShots);
+  }, [normalizedShots]);
+
+  const memoizedGameStats = useMemo(() => {
+    return calculateGameStats(filteredShots, filteredGames);
+  }, [filteredShots, filteredGames]);
+
+  const memoizedSmartInsights = useMemo(() => {
+    return generateSmartInsights(normalizedShots);
+  }, [normalizedShots]);
+
+  const memoizedPeriodBreakdown = useMemo(() => {
+    const periodStats: Record<number, { shots: number; goals: number }> = { 1: { shots: 0, goals: 0 }, 2: { shots: 0, goals: 0 }, 3: { shots: 0, goals: 0 } };
+    
+    normalizedShots.forEach(shot => {
+      if (periodStats[shot.period]) {
+        periodStats[shot.period].shots++;
+        if (shot.result === 'goal') {
+          periodStats[shot.period].goals++;
+        }
+      }
+    });
+
+    return Object.entries(periodStats).map(([period, stats]) => ({
+      period: `Period ${period}`,
+      shots: stats.shots,
+      goals: stats.goals
+    }));
+  }, [normalizedShots]);
+
+  const memoizedShotResultData = useMemo(() => [
+    { name: 'Goals', value: memoizedGameStats?.totalGoals || 0, color: '#22c55e' },
+    { name: 'Saves', value: memoizedGameStats?.totalSaves || 0, color: '#3b82f6' },
+    { name: 'Misses', value: memoizedGameStats?.totalMisses || 0, color: '#6b7280' },
+    { name: 'Blocked', value: memoizedGameStats?.totalBlocked || 0, color: '#f97316' }
+  ], [memoizedGameStats]);
+
+  const memoizedZoneChartData = useMemo(() => {
+    return memoizedZoneStats.map(zone => ({
+      zone: getZoneDisplayName(zone.zone),
+      shots: zone.shots,
+      goals: zone.goals,
+      percentage: zone.percentage
+    }));
+  }, [memoizedZoneStats]);
+
+  const generateSplashZones = useCallback((shots: NormalizedShotWithGame[], type: 'shot' | 'goal') => {
     if (!canvasRef.current) return null;
 
     const canvas = canvasRef.current;
@@ -58,7 +114,7 @@ const DataAnalysis: React.FC = () => {
     interface SplashZone {
       centerX: number;
       centerY: number;
-      shots: ShotWithGame[];
+      shots: NormalizedShotWithGame[];
       efficiency: number;
     }
     
@@ -69,16 +125,16 @@ const DataAnalysis: React.FC = () => {
     relevantShots.forEach((shot, index) => {
       if (processed.has(index)) return;
 
-      const centerX = shot.x * width;
-      const centerY = shot.y * height;
+      const centerX = shot.normalizedX * width;
+      const centerY = shot.normalizedY * height;
       const zone: SplashZone = { centerX, centerY, shots: [shot], efficiency: 0 };
 
       // Find nearby shots within radius
       relevantShots.forEach((otherShot, otherIndex) => {
         if (otherIndex === index || processed.has(otherIndex)) return;
 
-        const otherX = otherShot.x * width;
-        const otherY = otherShot.y * height;
+        const otherX = otherShot.normalizedX * width;
+        const otherY = otherShot.normalizedY * height;
         const distance = Math.sqrt(Math.pow(centerX - otherX, 2) + Math.pow(centerY - otherY, 2));
 
         if (distance <= radius) {
@@ -191,7 +247,7 @@ const DataAnalysis: React.FC = () => {
 
   // Generate heatmap/splash zones when view mode or data changes
   useEffect(() => {
-    if (!canvasRef.current || viewMode === 'chart' || filteredShots.length === 0) return;
+    if (!canvasRef.current || viewMode === 'chart' || normalizedShots.length === 0) return;
 
     const canvas = canvasRef.current;
     const container = rinkRef.current;
@@ -203,7 +259,7 @@ const DataAnalysis: React.FC = () => {
     canvas.height = Math.max(300, rect.height / 2);
 
     const type = viewMode === 'goal_heatmap' ? 'goal' : 'shot';
-    const visualizationData = generateSplashZones(filteredShots, type);
+    const visualizationData = generateSplashZones(normalizedShots, type);
     
     if (visualizationData && canvas) {
       const ctx = canvas.getContext('2d');
@@ -212,7 +268,7 @@ const DataAnalysis: React.FC = () => {
         ctx.putImageData(visualizationData, 0, 0);
       }
     }
-  }, [viewMode, filteredShots, generateSplashZones]);
+  }, [viewMode, normalizedShots, generateSplashZones]);
 
   const loadInitialData = async () => {
     try {
@@ -233,15 +289,18 @@ const DataAnalysis: React.FC = () => {
   const applyFilters = async () => {
     setLoading(true);
     try {
-      const [shots, games] = await Promise.all([
+      const [shots, games, normalizedShotsData, goalsAgainstData] = await Promise.all([
         getFilteredShots(filters),
-        getFilteredGames(filters)
+        getFilteredGames(filters),
+        getFilteredNormalizedShots(filters),
+        getFilteredGoalsAgainst(filters)
       ]);
 
       setFilteredShots(shots);
       setFilteredGames(games);
-      setZoneStats(calculateZoneStats(shots));
-      setGameStats(calculateGameStats(shots, games));
+      setNormalizedShots(normalizedShotsData);
+      setNormalizedGoalsAgainst(goalsAgainstData);
+      // Note: zoneStats, gameStats, and smartInsights are now computed via useMemo
     } catch (error) {
       console.error('Failed to apply filters:', error);
     }
@@ -257,13 +316,18 @@ const DataAnalysis: React.FC = () => {
     });
   };
 
-  const getShotPosition = (shot: ShotWithGame) => {
+  const getShotPosition = (shot: NormalizedShotWithGame) => {
     if (!rinkRef.current) return { left: '50%', top: '50%' };
 
-    const left = shot.x * 100; // Convert to percentage
-    const top = shot.y * 100; // Convert to percentage
+    const left = shot.normalizedX * 100; // Convert to percentage
+    const top = shot.normalizedY * 100; // Convert to percentage
     
-    console.log('DataAnalysis displaying shot:', {x: shot.x, y: shot.y, result: shot.result});
+    console.log('DataAnalysis displaying normalized shot:', {
+      original: { x: shot.x, y: shot.y }, 
+      normalized: { x: shot.normalizedX, y: shot.normalizedY },
+      result: shot.result,
+      period: shot.period
+    });
 
     return {
       left: `${Math.max(0, Math.min(100, left))}%`,
@@ -273,10 +337,10 @@ const DataAnalysis: React.FC = () => {
 
 
   const getInsights = () => {
-    if (filteredShots.length === 0 || zoneStats.length === 0) return null;
+    if (normalizedShots.length === 0 || memoizedZoneStats.length === 0) return null;
 
     // Zone analysis
-    const zoneStatsWithNames = zoneStats.map(zone => ({
+    const zoneStatsWithNames = memoizedZoneStats.map(zone => ({
       ...zone,
       name: getZoneDisplayName(zone.zone)
     }));
@@ -315,40 +379,11 @@ const DataAnalysis: React.FC = () => {
     };
   };
 
-  const getPeriodBreakdown = () => {
-    const periodStats: Record<number, { shots: number; goals: number }> = { 1: { shots: 0, goals: 0 }, 2: { shots: 0, goals: 0 }, 3: { shots: 0, goals: 0 } };
-    
-    filteredShots.forEach(shot => {
-      if (periodStats[shot.period]) {
-        periodStats[shot.period].shots++;
-        if (shot.result === 'goal') {
-          periodStats[shot.period].goals++;
-        }
-      }
-    });
+  // Removed getPeriodBreakdown - now using memoizedPeriodBreakdown
 
-    return Object.entries(periodStats).map(([period, stats]) => ({
-      period: `Period ${period}`,
-      shots: stats.shots,
-      goals: stats.goals
-    }));
-  };
+  // Removed shotResultData and zoneChartData - now using memoized versions
 
-  const shotResultData = [
-    { name: 'Goals', value: gameStats?.totalGoals || 0, color: '#22c55e' },
-    { name: 'Saves', value: gameStats?.totalSaves || 0, color: '#3b82f6' },
-    { name: 'Misses', value: gameStats?.totalMisses || 0, color: '#6b7280' },
-    { name: 'Blocked', value: gameStats?.totalBlocked || 0, color: '#f97316' }
-  ];
-
-  const zoneChartData = zoneStats.map(zone => ({
-    zone: getZoneDisplayName(zone.zone),
-    shots: zone.shots,
-    goals: zone.goals,
-    percentage: zone.percentage
-  }));
-
-  if (loading && filteredShots.length === 0) {
+  if (loading && normalizedShots.length === 0) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="flex flex-col items-center justify-center h-64">
@@ -439,7 +474,7 @@ const DataAnalysis: React.FC = () => {
               <div className="text-sm text-gray-600">
                 <div className="flex items-center space-x-2 mb-1">
                   <Target className="w-4 h-4" />
-                  <span>{filteredShots.length} shots analyzed</span>
+                  <span>{normalizedShots.length} shots analyzed</span>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Calendar className="w-4 h-4" />
@@ -460,7 +495,7 @@ const DataAnalysis: React.FC = () => {
                 <h3 className="font-semibold">Total Shots</h3>
               </div>
               <div className="text-2xl font-bold text-blue-600 mt-2">
-                {gameStats?.totalShots || 0}
+                {memoizedGameStats?.totalShots || 0}
               </div>
             </div>
 
@@ -470,7 +505,7 @@ const DataAnalysis: React.FC = () => {
                 <h3 className="font-semibold">Goal %</h3>
               </div>
               <div className="text-2xl font-bold text-green-600 mt-2">
-                {gameStats?.goalPercentage || 0}%
+                {memoizedGameStats?.goalPercentage || 0}%
               </div>
             </div>
 
@@ -480,7 +515,7 @@ const DataAnalysis: React.FC = () => {
                 <h3 className="font-semibold">Shots/Game</h3>
               </div>
               <div className="text-2xl font-bold text-purple-600 mt-2">
-                {gameStats?.shotsPerGame || 0}
+                {memoizedGameStats?.shotsPerGame || 0}
               </div>
             </div>
 
@@ -548,6 +583,25 @@ const DataAnalysis: React.FC = () => {
                   minHeight: '300px'
                 }}
               >
+                {/* Rink Zone Labels */}
+                <div className="absolute inset-0 pointer-events-none">
+                  {/* Defensive Zone Label (Left) */}
+                  <div className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-blue-100 bg-opacity-90 rounded-lg px-2 py-1 border border-blue-300">
+                    <div className="flex items-center space-x-1 text-blue-700 text-xs font-semibold">
+                      <Shield className="w-3 h-3" />
+                      <span>DEFENSIVE</span>
+                    </div>
+                  </div>
+                  
+                  {/* Offensive Zone Label (Right) */}
+                  <div className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-green-100 bg-opacity-90 rounded-lg px-2 py-1 border border-green-300">
+                    <div className="flex items-center space-x-1 text-green-700 text-xs font-semibold">
+                      <Crosshair className="w-3 h-3" />
+                      <span>OFFENSIVE</span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Splash Zone Canvas */}
                 {(viewMode === 'shot_heatmap' || viewMode === 'goal_heatmap') && (
                   <canvas
@@ -561,9 +615,9 @@ const DataAnalysis: React.FC = () => {
                 )}
                 
                 {/* Shot Overlays - only show in chart mode */}
-                {viewMode === 'chart' && filteredShots.map((shot, index) => {
+                {viewMode === 'chart' && normalizedShots.map((shot, index) => {
                   const position = getShotPosition(shot);
-                  const color = getShotColor(shot.result);
+                  const color = getEnhancedShotColor(shot.result, shot.dangerLevel);
                   
                   return (
                     <div
@@ -575,31 +629,67 @@ const DataAnalysis: React.FC = () => {
                         top: position.top,
                         zIndex: 10
                       }}
-                      title={`${shot.result.charAt(0).toUpperCase() + shot.result.slice(1)} - ${getRinkZone(shot.x, shot.y)}`}
+                      title={`${shot.result.charAt(0).toUpperCase() + shot.result.slice(1)} - ${getNormalizedRinkZone(shot.normalizedX, shot.normalizedY)} (${shot.dangerLevel} danger)`}
                     />
                   );
                 })}
+                
+                {/* Goals Against Overlays - defensive zone */}
+                {normalizedGoalsAgainst.map((goal, index) => (
+                  <div
+                    key={`goal-against-${goal.id}-${index}`}
+                    className="absolute transform -translate-x-1/2 -translate-y-1/2 text-red-500 font-bold text-lg hover:scale-150 transition-transform cursor-pointer"
+                    style={{
+                      left: `${goal.normalizedX * 100}%`,
+                      top: `${goal.normalizedY * 100}%`,
+                      zIndex: 12
+                    }}
+                    title={`Goal Against - Period ${goal.period}`}
+                  >
+                    ❌
+                  </div>
+                ))}
               </div>
 
               {/* Legend */}
               <div className="flex justify-center mt-4">
                 {viewMode === 'chart' && (
-                  <div className="flex flex-wrap justify-center space-x-4">
-                    <div className="flex items-center space-x-2">
-                      <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                      <span className="text-sm">Goals</span>
+                  <div className="flex flex-col items-center space-y-2">
+                    <div className="flex flex-wrap justify-center space-x-4">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                        <span className="text-sm">Goals</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                        <span className="text-sm">Saves</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-3 h-3 rounded-full bg-gray-500"></div>
+                        <span className="text-sm">Misses</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+                        <span className="text-sm">Blocked</span>
+                      </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                      <span className="text-sm">Saves</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-3 h-3 rounded-full bg-gray-500"></div>
-                      <span className="text-sm">Misses</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-                      <span className="text-sm">Blocked</span>
+                    <div className="flex items-center space-x-4 text-xs">
+                      <div className="flex items-center space-x-1">
+                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                        <span>High Danger</span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
+                        <span>Medium Danger</span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+                        <span>Low Danger</span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <span className="text-red-500 text-sm">❌</span>
+                        <span>Goals Against</span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -651,8 +741,37 @@ const DataAnalysis: React.FC = () => {
             </div>
           </div>
 
-          {/* Quick Insights Panel */}
-          {filteredShots.length > 0 && (() => {
+          {/* Smart Insights Panel */}
+          {normalizedShots.length > 0 && memoizedSmartInsights.length > 0 && (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold mb-4">Smart Insights</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                {memoizedSmartInsights.map((insight, index) => {
+                  const bgColor = insight.type === 'positive' ? 'bg-green-50 border-green-200' : 
+                                 insight.type === 'negative' ? 'bg-red-50 border-red-200' : 
+                                 'bg-blue-50 border-blue-200';
+                  const textColor = insight.type === 'positive' ? 'text-green-600' : 
+                                   insight.type === 'negative' ? 'text-red-600' : 
+                                   'text-blue-600';
+                  
+                  return (
+                    <div key={index} className={`${bgColor} border rounded-lg p-3`}>
+                      <div className={`${textColor} font-medium flex items-center space-x-2`}>
+                        <span>{insight.icon}</span>
+                        <span className="text-xs">{insight.text}</span>
+                      </div>
+                      {insight.value && (
+                        <div className="text-gray-600 text-xs mt-1">{insight.value}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
+          {/* Legacy Quick Insights Panel (fallback) */}
+          {normalizedShots.length > 0 && memoizedSmartInsights.length === 0 && (() => {
             const insights = getInsights();
             return insights ? (
               <div className="bg-white rounded-lg shadow-md p-6">
@@ -701,7 +820,7 @@ const DataAnalysis: React.FC = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={shotResultData}
+                      data={memoizedShotResultData}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
@@ -709,7 +828,7 @@ const DataAnalysis: React.FC = () => {
                       paddingAngle={5}
                       dataKey="value"
                     >
-                      {shotResultData.map((entry, index) => (
+                      {memoizedShotResultData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
@@ -724,7 +843,7 @@ const DataAnalysis: React.FC = () => {
               <h2 className="text-xl font-semibold mb-4">Period Breakdown</h2>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={getPeriodBreakdown()}>
+                  <BarChart data={memoizedPeriodBreakdown}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="period" />
                     <YAxis />
@@ -741,7 +860,7 @@ const DataAnalysis: React.FC = () => {
               <h2 className="text-xl font-semibold mb-4">Shooting % by Zone</h2>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={zoneChartData}>
+                  <BarChart data={memoizedZoneChartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis 
                       dataKey="zone" 
@@ -760,7 +879,7 @@ const DataAnalysis: React.FC = () => {
           </div>
 
           {/* Zone Statistics Table */}
-          {zoneStats.length > 0 && (
+          {memoizedZoneStats.length > 0 && (
             <div className="bg-white rounded-lg shadow-md p-6">
               <h2 className="text-xl font-semibold mb-4">Zone Breakdown</h2>
               <div className="overflow-x-auto">
@@ -776,7 +895,7 @@ const DataAnalysis: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {zoneStats
+                    {memoizedZoneStats
                       .sort((a, b) => b.percentage - a.percentage)
                       .map((zone) => (
                         <tr key={zone.zone} className="border-t">
@@ -797,7 +916,7 @@ const DataAnalysis: React.FC = () => {
           )}
 
           {/* Empty State */}
-          {filteredShots.length === 0 && !loading && (
+          {normalizedShots.length === 0 && !loading && (
             <div className="bg-white rounded-lg shadow-md p-12 text-center">
               <Target className="w-16 h-16 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No shot data found</h3>

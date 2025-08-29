@@ -1,5 +1,11 @@
-import type { RinkZone, Shot, ShotWithGame, Game, ZoneStats, GameStats, AnalysisFilters } from '../../types';
+import type { RinkZone, Shot, ShotWithGame, Game, ZoneStats, GameStats, AnalysisFilters, GoalAgainst } from '../../types';
 import { dbHelpers } from '../../db';
+import { 
+  normalizeShotsArray, 
+  normalizeGoalAgainst, 
+  getNormalizedRinkZone,
+  type NormalizedShotWithGame 
+} from '../../utils/shotNormalization';
 
 // Define rink zones based on normalized coordinates (0-1)
 // Assumes attacking zone is on the right side (x > 0.5)
@@ -105,6 +111,45 @@ export const calculateZoneStats = (shots: Shot[]): ZoneStats[] => {
   return Object.values(zoneData).filter(zone => zone.shots > 0);
 };
 
+// New normalized version using normalized coordinates
+export const calculateNormalizedZoneStats = (normalizedShots: NormalizedShotWithGame[]): ZoneStats[] => {
+  const zoneData: Record<RinkZone, ZoneStats> = {
+    high_slot: { zone: 'high_slot', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 },
+    low_slot: { zone: 'low_slot', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 },
+    left_circle: { zone: 'left_circle', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 },
+    right_circle: { zone: 'right_circle', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 },
+    left_point: { zone: 'left_point', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 },
+    right_point: { zone: 'right_point', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 },
+    left_wing: { zone: 'left_wing', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 },
+    right_wing: { zone: 'right_wing', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 },
+    center_point: { zone: 'center_point', shots: 0, goals: 0, saves: 0, misses: 0, percentage: 0 }
+  };
+
+  normalizedShots.forEach(shot => {
+    const zone = getNormalizedRinkZone(shot.normalizedX, shot.normalizedY);
+    zoneData[zone].shots++;
+    
+    switch (shot.result) {
+      case 'goal':
+        zoneData[zone].goals++;
+        break;
+      case 'save':
+        zoneData[zone].saves++;
+        break;
+      case 'miss':
+        zoneData[zone].misses++;
+        break;
+    }
+  });
+
+  // Calculate percentages
+  Object.values(zoneData).forEach(zone => {
+    zone.percentage = zone.shots > 0 ? (zone.goals / zone.shots) * 100 : 0;
+  });
+
+  return Object.values(zoneData).filter(zone => zone.shots > 0);
+};
+
 export const calculateGameStats = (shots: Shot[], games: Game[]): GameStats => {
   const totalShots = shots.length;
   const totalGoals = shots.filter(s => s.result === 'goal').length;
@@ -174,6 +219,47 @@ export const getFilteredShots = async (filters: AnalysisFilters): Promise<ShotWi
   }
 
   return shotsWithGameData;
+};
+
+// Enhanced version that returns normalized shots with games
+export const getFilteredNormalizedShots = async (filters: AnalysisFilters): Promise<NormalizedShotWithGame[]> => {
+  const games = await getFilteredGames(filters);
+  const shots = await getFilteredShots(filters);
+  
+  // Normalize shots using the normalization utility
+  return normalizeShotsArray(shots, games);
+};
+
+// Get goals against with normalization
+export const getFilteredGoalsAgainst = async (filters: AnalysisFilters) => {
+  const games = await getFilteredGames(filters);
+  const goalsAgainst: GoalAgainst[] = [];
+  
+  for (const game of games) {
+    const gameGoalsAgainst = await dbHelpers.getGoalsAgainstByGame(game.id);
+    goalsAgainst.push(...gameGoalsAgainst);
+  }
+  
+  // Normalize goals against
+  return goalsAgainst.map(goal => normalizeGoalAgainst(goal, games.find(g => g.id === goal.gameId)!));
+};
+
+// Enhanced shot color with danger level
+export const getEnhancedShotColor = (result: Shot['result'], dangerLevel?: 'high' | 'medium' | 'low'): string => {
+  if (result === 'goal') {
+    return '#22c55e'; // Green for goals
+  }
+  
+  // Color other results by danger level if available
+  if (dangerLevel) {
+    switch (dangerLevel) {
+      case 'high': return result === 'save' ? '#ef4444' : '#f97316'; // Red/Orange for high danger
+      case 'medium': return result === 'save' ? '#f59e0b' : '#eab308'; // Yellow for medium danger
+      case 'low': return result === 'save' ? '#6b7280' : '#9ca3af'; // Gray for low danger
+    }
+  }
+  
+  return getShotColor(result);
 };
 
 export const getFilteredGames = async (filters: AnalysisFilters): Promise<Game[]> => {
