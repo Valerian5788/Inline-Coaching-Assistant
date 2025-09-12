@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import type { Team, Player, Position } from '../types';
-import { dbHelpers } from '../db';
+import { dbHelpers, subscribeToCollection } from '../db';
 import { useAppStore } from '../stores/appStore';
+import { useAuth } from '../contexts/AuthContext';
 
 const Teams: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -20,14 +21,24 @@ const Teams: React.FC = () => {
   });
 
   const { setSelectedTeam } = useAppStore();
+  const { currentUser } = useAuth();
 
   useEffect(() => {
-    loadTeams();
+    // Subscribe to real-time teams updates
+    const unsubscribeTeams = subscribeToCollection<Team>('teams', (updatedTeams) => {
+      setTeams(updatedTeams);
+    });
+
+    return () => {
+      unsubscribeTeams();
+    };
   }, []);
 
   useEffect(() => {
     if (selectedTeam) {
       loadPlayers(selectedTeam.id);
+    } else {
+      setPlayers([]);
     }
   }, [selectedTeam]);
 
@@ -43,18 +54,21 @@ const Teams: React.FC = () => {
 
   const handleCreateTeam = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
+    
     const newTeam: Team = {
       id: crypto.randomUUID(),
       name: teamForm.name,
       shortName: teamForm.shortName,
       color: teamForm.color,
-      players: []
+      players: [],
+      userId: currentUser.uid
     };
 
     await dbHelpers.createTeam(newTeam);
     setTeamForm({ name: '', shortName: '', color: '#3B82F6' });
     setIsCreateTeamOpen(false);
-    loadTeams();
+    // Real-time subscription will update the UI automatically
   };
 
   const handleEditTeam = (team: Team) => {
@@ -76,7 +90,7 @@ const Teams: React.FC = () => {
     setTeamForm({ name: '', shortName: '', color: '#3B82F6' });
     setIsEditTeamOpen(false);
     setTeamToEdit(null);
-    loadTeams();
+    // Real-time subscription will update the UI automatically
     
     // Update selected team if it was the one being edited
     if (selectedTeam?.id === teamToEdit.id) {
@@ -97,7 +111,7 @@ const Teams: React.FC = () => {
         setPlayers([]);
       }
       
-      loadTeams();
+      // Real-time subscription will update the UI automatically
     }
   };
 

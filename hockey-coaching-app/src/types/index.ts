@@ -1,11 +1,13 @@
 export type Position = 'D' | 'F' | 'G';
 
+
 export interface Team {
   id: string;
   name: string;
   shortName: string;
   color: string;
   players: Player[];
+  userId: string; // Owner of this team
 }
 
 export interface Player {
@@ -15,6 +17,7 @@ export interface Player {
   jerseyNumber: number;
   position: Position;
   teamId: string;
+  userId: string; // Owner of this player
 }
 
 export type SeasonType = 'regular' | 'playoffs' | 'tournament';
@@ -28,6 +31,7 @@ export interface Season {
   type: SeasonType;
   status: SeasonStatus;
   description?: string;
+  userId: string; // Owner of this season
 }
 
 export type GameStatus = 'planned' | 'live' | 'archived';
@@ -51,6 +55,7 @@ export interface Game {
   teamSide?: TeamSide; // Which side our team defends in current period
   initialTeamSide?: RinkSide; // Which side of rink team defends first period
   timeoutUsed?: boolean; // Whether timeout has been used
+  userId: string; // Owner of this game
 }
 
 export type ShotResult = 'goal' | 'save' | 'miss' | 'blocked';
@@ -204,6 +209,7 @@ export interface Drill {
   drawingElements?: DrawingElement[]; // New enhanced elements
   createdAt: string;
   updatedAt: string;
+  userId: string; // Owner of this drill
 }
 
 // Tactical drawings for live game tracking
@@ -262,3 +268,4 @@ export interface GamePreset {
   createdAt: string;
   updatedAt: string;
 }
+

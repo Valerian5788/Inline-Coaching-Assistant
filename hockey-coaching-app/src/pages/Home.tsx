@@ -73,8 +73,8 @@ const Home: React.FC = () => {
   const loadDashboardData = async () => {
     try {
       const [allGames, allTeams] = await Promise.all([
-        dbHelpers.getAllGames(),
-        dbHelpers.getAllTeams()
+        dbHelpers.getAllGames().catch(() => []),
+        dbHelpers.getAllTeams().catch(() => [])
       ]);
       
       setTeams(allTeams);
@@ -112,7 +112,7 @@ const Home: React.FC = () => {
         const archivedGames = seasonGames.filter(game => game.status === 'archived');
         if (archivedGames.length > 0) {
           const allShots = await Promise.all(
-            archivedGames.map(game => dbHelpers.getShotsByGame(game.id))
+            archivedGames.map(game => dbHelpers.getShotsByGame(game.id).catch(() => []))
           );
           const flatShots = allShots.flat();
           const totalShots = flatShots.length;

@@ -12,8 +12,11 @@ import PracticePlanner from './pages/Training/PracticePlanner';
 import ShotTracking from './pages/LiveTracking/ShotTracking';
 import DrawPlay from './pages/LiveTracking/DrawPlay';
 import QuickStats from './pages/LiveTracking/QuickStats';
+import { ToastProvider } from './contexts/ToastContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { Login } from './components/Login';
 
-function App() {
+const AuthenticatedApp = () => {
   return (
     <Router>
       <Routes>
@@ -38,6 +41,22 @@ function App() {
         <Route path="/training/practice-planner/:id" element={<PracticePlanner />} />
       </Routes>
     </Router>
+  );
+};
+
+const AppContent = () => {
+  const { currentUser } = useAuth();
+  
+  return currentUser ? <AuthenticatedApp /> : <Login />;
+};
+
+function App() {
+  return (
+    <ToastProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ToastProvider>
   );
 }
 
