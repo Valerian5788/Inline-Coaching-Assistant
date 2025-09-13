@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Season, SeasonType, SeasonStatus } from '../types';
 import { dbHelpers } from '../db';
 import { useAppStore } from '../stores/appStore';
+import { useAuth } from '../contexts/AuthContext';
 import { Calendar, Trophy, Play, Archive, Edit2, Trash2, Plus, Crown } from 'lucide-react';
 
 const Seasons: React.FC = () => {
@@ -22,6 +23,7 @@ const Seasons: React.FC = () => {
   });
 
   const { setActiveSeason, setCurrentSeason, loadActiveSeason } = useAppStore();
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     loadSeasons();
@@ -29,28 +31,37 @@ const Seasons: React.FC = () => {
   }, []);
 
   const loadSeasons = async () => {
-    const allSeasons = await dbHelpers.getSeasonsWithGameCounts();
-    const allGames = await dbHelpers.getAllGames();
-    
-    // Calculate played vs upcoming games for each season
-    const seasonsWithBreakdown = allSeasons.map(season => {
-      const seasonGames = allGames.filter(game => game.seasonId === season.id);
-      const playedCount = seasonGames.filter(game => game.status === 'archived').length;
-      const upcomingCount = seasonGames.filter(game => game.status === 'planned').length;
-      
-      return {
-        ...season,
-        playedCount,
-        upcomingCount
-      };
-    });
-    
-    setSeasons(seasonsWithBreakdown);
+    try {
+      const [allSeasons, allGames] = await Promise.all([
+        dbHelpers.getSeasonsWithGameCounts().catch(() => []),
+        dbHelpers.getAllGames().catch(() => [])
+      ]);
+
+      // Calculate played vs upcoming games for each season
+      const seasonsWithBreakdown = allSeasons.map(season => {
+        const seasonGames = allGames.filter(game => game.seasonId === season.id);
+        const playedCount = seasonGames.filter(game => game.status === 'archived').length;
+        const upcomingCount = seasonGames.filter(game => game.status === 'planned').length;
+
+        return {
+          ...season,
+          playedCount,
+          upcomingCount
+        };
+      });
+
+      setSeasons(seasonsWithBreakdown);
+    } catch (error) {
+      console.error('Error loading seasons:', error);
+      setSeasons([]); // Fallback to empty array
+    }
     setLoading(false);
   };
 
   const handleCreateSeason = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) return;
+
     const newSeason: Season = {
       id: crypto.randomUUID(),
       name: seasonForm.name,
@@ -58,7 +69,8 @@ const Seasons: React.FC = () => {
       endDate: seasonForm.endDate,
       type: seasonForm.type,
       status: seasonForm.status,
-      description: seasonForm.description
+      description: seasonForm.description,
+      userId: currentUser.uid
     };
 
     await dbHelpers.createSeason(newSeason);

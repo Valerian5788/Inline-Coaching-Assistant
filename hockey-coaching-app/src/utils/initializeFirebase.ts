@@ -6,16 +6,22 @@ import type { GamePreset } from '../types';
  */
 export const initializeFirebaseDefaults = async (): Promise<void> => {
   try {
+    // Get current user ID
+    const userId = (await import('../firebase')).auth.currentUser?.uid;
+    if (!userId) {
+      console.log('No authenticated user, skipping Firebase defaults initialization');
+      return;
+    }
+
     // Check if default game presets already exist
-    const existingPresets = await dbHelpers.getAllGamePresets();
-    
+    const existingPresets = await dbHelpers.getAllGamePresets().catch((error) => {
+      console.log('GamePresets collection not accessible yet:', error.message);
+      return [];
+    });
+
     if (existingPresets.length === 0) {
       // Create default game presets
       const now = new Date().toISOString();
-      
-      // Get current user ID
-      const userId = (await import('../firebase')).auth.currentUser?.uid;
-      if (!userId) return;
 
       const seniorPreset: GamePreset = {
         id: 'preset-senior',
@@ -29,7 +35,7 @@ export const initializeFirebaseDefaults = async (): Promise<void> => {
         updatedAt: now,
         userId
       };
-      
+
       const juniorPreset: GamePreset = {
         id: 'preset-junior',
         name: 'Junior Game',
@@ -41,15 +47,20 @@ export const initializeFirebaseDefaults = async (): Promise<void> => {
         updatedAt: now,
         userId
       };
-      
-      await Promise.all([
-        dbHelpers.createGamePreset(seniorPreset),
-        dbHelpers.createGamePreset(juniorPreset)
-      ]);
-      
-      console.log('✅ Default game presets created');
+
+      try {
+        await Promise.all([
+          dbHelpers.createGamePreset(seniorPreset),
+          dbHelpers.createGamePreset(juniorPreset)
+        ]);
+
+        console.log('✅ Default game presets created');
+      } catch (error) {
+        console.log('GamePreset creation failed (likely permissions), skipping defaults:', error);
+      }
     }
   } catch (error) {
     console.error('Failed to initialize Firebase defaults:', error);
+    // Don't throw the error - this should not break the app
   }
 };

@@ -143,16 +143,22 @@ export const firebaseDbHelpers = {
   // PLAYERS
   // ==========================================
   async getPlayersByTeam(teamId: string): Promise<Player[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.players),
       where('teamId', '==', teamId),
-      orderBy('jerseyNumber')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const players = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as Player[];
+
+    // Sort client-side instead of server-side
+    return players.sort((a, b) => a.jerseyNumber - b.jerseyNumber);
   },
 
   async createPlayer(player: Player): Promise<string> {
@@ -184,15 +190,21 @@ export const firebaseDbHelpers = {
   // SEASONS
   // ==========================================
   async getAllSeasons(): Promise<Season[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.seasons),
-      orderBy('startDate', 'desc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const seasons = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as Season[];
+
+    // Sort client-side instead of server-side
+    return seasons.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
   },
 
   async getSeasonById(id: string): Promise<Season | undefined> {
@@ -249,31 +261,37 @@ export const firebaseDbHelpers = {
   },
 
   async getActiveSeason(type?: 'regular' | 'tournament' | 'playoffs'): Promise<Season | undefined> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return undefined;
+
     let q;
     if (type) {
       q = query(
         collection(db, COLLECTIONS.seasons),
+        where('userId', '==', userId),
         where('status', '==', 'active'),
-        where('type', '==', type),
-        orderBy('startDate', 'desc'),
-        limit(1)
+        where('type', '==', type)
       );
     } else {
       q = query(
         collection(db, COLLECTIONS.seasons),
-        where('status', '==', 'active'),
-        orderBy('startDate', 'desc'),
-        limit(1)
+        where('userId', '==', userId),
+        where('status', '==', 'active')
       );
     }
     
     const querySnapshot = await getDocs(q);
-    if (!querySnapshot.empty) {
-      const doc = querySnapshot.docs[0];
-      return {
-        id: doc.id,
-        ...convertTimestamps(doc.data())
-      } as Season;
+
+    // Get all matching seasons and sort client-side
+    const seasons = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...convertTimestamps(doc.data())
+    })) as Season[];
+
+    if (seasons.length > 0) {
+      // Sort by startDate descending and return the first one
+      const sortedSeasons = seasons.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime());
+      return sortedSeasons[0];
     }
     return undefined;
   },
@@ -284,8 +302,12 @@ export const firebaseDbHelpers = {
     if (!season) return;
 
     // Set existing seasons of same type to completed
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
     const existingActiveQuery = query(
       collection(db, COLLECTIONS.seasons),
+      where('userId', '==', userId),
       where('status', '==', 'active'),
       where('type', '==', season.type)
     );
@@ -302,9 +324,13 @@ export const firebaseDbHelpers = {
   },
 
   async getSeasonGameCount(seasonId: string): Promise<number> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return 0;
+
     const q = query(
       collection(db, COLLECTIONS.games),
-      where('seasonId', '==', seasonId)
+      where('seasonId', '==', seasonId),
+      where('userId', '==', userId)
     );
     const snapshot = await getDocs(q);
     return snapshot.size;
@@ -325,8 +351,12 @@ export const firebaseDbHelpers = {
   // GAMES
   // ==========================================
   async getAllGames(): Promise<Game[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.games),
+      where('userId', '==', userId),
       orderBy('date', 'desc')
     );
     const querySnapshot = await getDocs(q);
@@ -337,16 +367,22 @@ export const firebaseDbHelpers = {
   },
 
   async getGamesBySeason(seasonId: string): Promise<Game[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.games),
       where('seasonId', '==', seasonId),
-      orderBy('date', 'desc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const games = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as Game[];
+
+    // Sort client-side instead of server-side
+    return games.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
   async getGameById(id: string): Promise<Game | undefined> {
@@ -540,15 +576,21 @@ export const firebaseDbHelpers = {
   // DRILLS
   // ==========================================
   async getAllDrills(): Promise<Drill[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.drills),
-      orderBy('updatedAt', 'desc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const drills = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as Drill[];
+
+    // Sort client-side
+    return drills.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
   },
 
   async getDrillById(id: string): Promise<Drill | undefined> {
@@ -617,15 +659,21 @@ export const firebaseDbHelpers = {
   // PRACTICE PLANS
   // ==========================================
   async getAllPracticePlans(): Promise<PracticePlan[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.practicePlans),
-      orderBy('date', 'desc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const plans = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as PracticePlan[];
+
+    // Sort client-side
+    return plans.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
   async getPracticePlanById(id: string): Promise<PracticePlan | undefined> {
@@ -736,8 +784,12 @@ export const firebaseDbHelpers = {
   // GAME PRESETS
   // ==========================================
   async getAllGamePresets(): Promise<GamePreset[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.gamePresets),
+      where('userId', '==', userId),
       orderBy('name', 'asc')
     );
     const querySnapshot = await getDocs(q);
@@ -745,7 +797,7 @@ export const firebaseDbHelpers = {
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as GamePreset[];
-    
+
     // Sort with default presets first
     return presets.sort((a, b) => {
       if (a.isDefault !== b.isDefault) {

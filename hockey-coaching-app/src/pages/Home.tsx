@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../stores/appStore';
+import { useAuth } from '../contexts/AuthContext';
 import { dbHelpers } from '../db';
 import type { Game, Team } from '../types';
 import { 
@@ -50,6 +51,7 @@ interface UpcomingGame {
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const { currentSeason } = useAppStore();
+  const { currentUser } = useAuth();
   const [lastGame, setLastGame] = useState<Game | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [seasonStats, setSeasonStats] = useState<GameStats | null>(null);
@@ -190,14 +192,14 @@ const Home: React.FC = () => {
   };
 
   const createQuickGame = async () => {
-    if (!currentSeason || teams.length === 0) {
+    if (!currentSeason || teams.length === 0 || !currentUser) {
       alert('Please create a team and season first');
       return;
     }
 
     const now = new Date();
     const gameDateTime = now.toISOString();
-    
+
     const newGame: Game = {
       id: crypto.randomUUID(),
       homeTeamId: teams[0].id,
@@ -209,7 +211,8 @@ const Home: React.FC = () => {
       periodMinutes: 25,
       hasOvertime: true,
       homeScore: 0,
-      awayScore: 0
+      awayScore: 0,
+      userId: currentUser.uid
     };
 
     await dbHelpers.createGame(newGame);
@@ -217,14 +220,14 @@ const Home: React.FC = () => {
   };
 
   const startQuickPractice = async () => {
-    if (!currentSeason || teams.length === 0) {
+    if (!currentSeason || teams.length === 0 || !currentUser) {
       alert('Please create a team and season first');
       return;
     }
 
     const now = new Date();
     const gameDateTime = now.toISOString();
-    
+
     const practiceGame: Game = {
       id: crypto.randomUUID(),
       homeTeamId: teams[0].id,
@@ -236,7 +239,8 @@ const Home: React.FC = () => {
       periodMinutes: 60,
       hasOvertime: false,
       homeScore: 0,
-      awayScore: 0
+      awayScore: 0,
+      userId: currentUser.uid
     };
 
     await dbHelpers.createGame(practiceGame);
@@ -346,49 +350,45 @@ const Home: React.FC = () => {
       </div>
 
       {/* Quick Actions Section */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
         <button
           onClick={createQuickGame}
-          className="bg-green-500 hover:bg-green-600 text-white font-bold py-6 px-4 rounded-lg flex flex-col items-center space-y-3 transition-all transform hover:scale-105 min-h-[120px] touch-action-manipulation"
-          style={{ minWidth: '100px', minHeight: '100px' }}
+          className="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-bold py-4 sm:py-6 px-3 sm:px-4 rounded-lg flex flex-col items-center space-y-2 sm:space-y-3 transition-all transform active:scale-95 min-h-[100px] sm:min-h-[120px] touch-action-manipulation"
         >
-          <Play className="w-8 h-8" />
-          <span className="text-lg text-center">Start Game</span>
+          <Play className="w-6 h-6 sm:w-8 sm:h-8" />
+          <span className="text-sm sm:text-lg text-center leading-tight">Start Game</span>
         </button>
-        
+
         <button
           onClick={startQuickPractice}
-          className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-6 px-4 rounded-lg flex flex-col items-center space-y-3 transition-all transform hover:scale-105 min-h-[120px] touch-action-manipulation"
-          style={{ minWidth: '100px', minHeight: '100px' }}
+          className="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold py-4 sm:py-6 px-3 sm:px-4 rounded-lg flex flex-col items-center space-y-2 sm:space-y-3 transition-all transform active:scale-95 min-h-[100px] sm:min-h-[120px] touch-action-manipulation"
         >
-          <Target className="w-8 h-8" />
-          <span className="text-lg text-center">Quick Practice</span>
+          <Target className="w-6 h-6 sm:w-8 sm:h-8" />
+          <span className="text-sm sm:text-lg text-center leading-tight">Quick Practice</span>
         </button>
-        
+
         <button
           onClick={() => navigate('/games')}
-          className="bg-purple-500 hover:bg-purple-600 text-white font-bold py-6 px-4 rounded-lg flex flex-col items-center space-y-3 transition-all transform hover:scale-105 min-h-[120px] touch-action-manipulation"
-          style={{ minWidth: '100px', minHeight: '100px' }}
+          className="bg-purple-500 hover:bg-purple-600 active:bg-purple-700 text-white font-bold py-4 sm:py-6 px-3 sm:px-4 rounded-lg flex flex-col items-center space-y-2 sm:space-y-3 transition-all transform active:scale-95 min-h-[100px] sm:min-h-[120px] touch-action-manipulation"
         >
-          <Calendar className="w-8 h-8" />
-          <span className="text-lg text-center">View Schedule</span>
+          <Calendar className="w-6 h-6 sm:w-8 sm:h-8" />
+          <span className="text-sm sm:text-lg text-center leading-tight">View Schedule</span>
         </button>
-        
+
         <button
-          onClick={() => navigate('/drills')}
-          className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-6 px-4 rounded-lg flex flex-col items-center space-y-3 transition-all transform hover:scale-105 min-h-[120px] touch-action-manipulation"
-          style={{ minWidth: '100px', minHeight: '100px' }}
+          onClick={() => navigate('/training')}
+          className="bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-bold py-4 sm:py-6 px-3 sm:px-4 rounded-lg flex flex-col items-center space-y-2 sm:space-y-3 transition-all transform active:scale-95 min-h-[100px] sm:min-h-[120px] touch-action-manipulation"
         >
-          <Zap className="w-8 h-8" />
-          <span className="text-lg text-center">Design Drill</span>
+          <Zap className="w-6 h-6 sm:w-8 sm:h-8" />
+          <span className="text-sm sm:text-lg text-center leading-tight">Design Drill</span>
         </button>
       </div>
       {/* Today's Overview */}
       {(upcomingGame && isToday(upcomingGame.date.toISOString())) || (lastGame && isToday(lastGame.date)) ? (
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <div className="flex items-center space-x-2 mb-4">
+          <div className="flex items-center space-x-1 sm:space-x-2 mb-3 sm:mb-4">
             <CalendarDays className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-semibold">Today's Overview</h2>
+            <h2 className="text-sm sm:text-xl font-semibold">Today's Overview</h2>
           </div>
           
           {upcomingGame && isToday(upcomingGame.date.toISOString()) && (
@@ -421,16 +421,16 @@ const Home: React.FC = () => {
         </div>
       ) : null}
       
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6 mb-8">
         {/* Quick Stats Dashboard */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex items-center space-x-2 mb-4">
-            <BarChart3 className="w-5 h-5 text-green-600" />
-            <h2 className="text-xl font-semibold">This Week</h2>
+        <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+          <div className="flex items-center space-x-1 sm:space-x-2 mb-3 sm:mb-4">
+            <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
+            <h2 className="text-sm sm:text-xl font-semibold">This Week</h2>
           </div>
           {seasonStats ? (
             <div className="text-center">
-              <div className="text-3xl font-bold text-green-600 mb-1">
+              <div className="text-2xl sm:text-3xl font-bold text-green-600 mb-1">
                 {seasonStats.gamesThisWeek}
               </div>
               <div className="text-sm text-gray-600">
@@ -443,14 +443,14 @@ const Home: React.FC = () => {
         </div>
 
         {/* Season Record */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex items-center space-x-2 mb-4">
-            <Trophy className="w-5 h-5 text-yellow-600" />
-            <h2 className="text-xl font-semibold">Season Record</h2>
+        <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+          <div className="flex items-center space-x-1 sm:space-x-2 mb-3 sm:mb-4">
+            <Trophy className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600" />
+            <h2 className="text-sm sm:text-xl font-semibold">Season Record</h2>
           </div>
           {seasonStats && seasonStats.totalGames > 0 ? (
             <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600 mb-1">
+              <div className="text-xl sm:text-2xl font-bold text-blue-600 mb-1">
                 {seasonStats.wins}-{seasonStats.losses}-{seasonStats.ties}
               </div>
               <div className="text-sm text-gray-600">
@@ -463,14 +463,14 @@ const Home: React.FC = () => {
         </div>
 
         {/* Team Shooting % */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex items-center space-x-2 mb-4">
-            <Target className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-semibold">Shooting %</h2>
+        <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+          <div className="flex items-center space-x-1 sm:space-x-2 mb-3 sm:mb-4">
+            <Target className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+            <h2 className="text-sm sm:text-xl font-semibold">Shooting %</h2>
           </div>
           {seasonStats && seasonStats.totalShots > 0 ? (
             <div className="text-center">
-              <div className="text-3xl font-bold text-blue-600 mb-1">
+              <div className="text-2xl sm:text-3xl font-bold text-blue-600 mb-1">
                 {seasonStats.bestShootingPercentage.toFixed(1)}%
               </div>
               <div className="text-sm text-gray-600">
@@ -483,10 +483,10 @@ const Home: React.FC = () => {
         </div>
         
         {/* Recent Form */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex items-center space-x-2 mb-4">
-            <Activity className="w-5 h-5 text-purple-600" />
-            <h2 className="text-xl font-semibold">Recent Form</h2>
+        <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+          <div className="flex items-center space-x-1 sm:space-x-2 mb-3 sm:mb-4">
+            <Activity className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
+            <h2 className="text-sm sm:text-xl font-semibold">Recent Form</h2>
           </div>
           {seasonStats && seasonStats.recentForm.length > 0 ? (
             <div className="flex justify-center space-x-1">
@@ -511,9 +511,9 @@ const Home: React.FC = () => {
       {/* Recent Activity Feed */}
       {recentActivity.length > 0 && (
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <div className="flex items-center space-x-2 mb-4">
+          <div className="flex items-center space-x-1 sm:space-x-2 mb-3 sm:mb-4">
             <Clock className="w-5 h-5 text-gray-600" />
-            <h2 className="text-xl font-semibold">Recent Activity</h2>
+            <h2 className="text-sm sm:text-xl font-semibold">Recent Activity</h2>
           </div>
           <div className="space-y-3">
             {recentActivity.map((activity) => (

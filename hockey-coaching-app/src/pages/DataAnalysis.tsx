@@ -18,7 +18,9 @@ import {
   type NormalizedShotWithGame,
   type NormalizedGoalAgainst
 } from '../utils/shotNormalization';
-import { Filter, Target, TrendingUp, Calendar, Users, RotateCcw, Shield, Crosshair } from 'lucide-react';
+import { exportGameReport, prepareGameReportData } from '../utils/pdfExport';
+import AdvancedCharts from '../components/AdvancedCharts';
+import { Filter, Target, TrendingUp, Calendar, Users, RotateCcw, Shield, Crosshair, Download, FileText } from 'lucide-react';
 
 const DataAnalysis: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -30,6 +32,7 @@ const DataAnalysis: React.FC = () => {
   // Removed: zoneStats, gameStats, and smartInsights are now memoized
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'chart' | 'shot_heatmap' | 'goal_heatmap'>('chart');
+  const [showFilters, setShowFilters] = useState(false);
 
   const rinkRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -273,15 +276,18 @@ const DataAnalysis: React.FC = () => {
   const loadInitialData = async () => {
     try {
       const [allTeams, allSeasons] = await Promise.all([
-        dbHelpers.getAllTeams(),
-        dbHelpers.getAllSeasons()
+        dbHelpers.getAllTeams().catch(() => []),
+        dbHelpers.getAllSeasons().catch(() => [])
       ]);
-      
+
       setTeams(allTeams);
       setSeasons(allSeasons);
       setLoading(false);
     } catch (error) {
       console.error('Failed to load initial data:', error);
+      // Set empty arrays as fallback
+      setTeams([]);
+      setSeasons([]);
       setLoading(false);
     }
   };
@@ -314,6 +320,64 @@ const DataAnalysis: React.FC = () => {
       dateFrom: '',
       dateTo: ''
     });
+  };
+
+  const handleExportPDF = async () => {
+    if (!memoizedGameStats || filteredShots.length === 0) {
+      alert('No data to export. Please track some games first.');
+      return;
+    }
+
+    try {
+      // Find the team and season for the report
+      const team = teams.find(t => t.id === filters.teamId) || teams[0];
+      const season = seasons.find(s => s.id === filters.seasonId) || seasons[0];
+
+      if (!team || !season) {
+        alert('Team and season data required for export.');
+        return;
+      }
+
+      // Create a sample game for the analysis report
+      const analysisGame: Game = {
+        id: 'analysis-report',
+        homeTeamId: team.id,
+        awayTeamName: 'Multiple Opponents',
+        date: new Date().toISOString(),
+        status: 'archived' as const,
+        seasonId: season.id,
+        periods: 3,
+        periodMinutes: 20,
+        hasOvertime: false,
+        homeScore: memoizedGameStats.totalGoals,
+        awayScore: 0, // Analysis doesn't track opponent goals
+        userId: team.userId
+      };
+
+      // Generate insights from smart insights or fallback
+      const insights = memoizedSmartInsights.length > 0
+        ? memoizedSmartInsights.map(insight => insight.text + (insight.value ? ` (${insight.value})` : ''))
+        : [];
+
+      // Add zone-based insights if available
+      if (memoizedZoneStats.length > 0) {
+        const bestZone = memoizedZoneStats.reduce((max, zone) => zone.percentage > max.percentage ? zone : max);
+        insights.push(`Best shooting zone: ${getZoneDisplayName(bestZone.zone)} with ${bestZone.percentage.toFixed(1)}% success rate`);
+      }
+
+      const reportData = prepareGameReportData(
+        analysisGame,
+        team,
+        season,
+        filteredShots,
+        insights
+      );
+
+      await exportGameReport(reportData);
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      alert('Failed to export PDF. Please try again.');
+    }
   };
 
   const getShotPosition = (shot: NormalizedShotWithGame) => {
@@ -398,18 +462,38 @@ const DataAnalysis: React.FC = () => {
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-6">Data Analysis</h1>
 
+      {/* Mobile Filter Toggle */}
+      <div className="lg:hidden mb-4">
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className="w-full bg-white rounded-lg shadow-md p-4 flex items-center justify-between touch-action-manipulation"
+        >
+          <div className="flex items-center space-x-2">
+            <Filter className="w-5 h-5 text-blue-600" />
+            <span className="font-semibold">Filters</span>
+            <span className="text-sm text-gray-500">
+              ({Object.values(filters).filter(v => v).length} active)
+            </span>
+          </div>
+          <div className={`transform transition-transform ${showFilters ? 'rotate-180' : ''}`}>
+            ▼
+          </div>
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Filters Sidebar */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-lg shadow-md p-6 sticky top-4">
+        <div className={`lg:col-span-1 ${showFilters ? 'block' : 'hidden lg:block'}`}>
+          <div className="bg-white rounded-lg shadow-md p-4 lg:p-6 lg:sticky lg:top-4">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold flex items-center space-x-2">
                 <Filter className="w-5 h-5" />
-                <span>Filters</span>
+                <span className="hidden lg:inline">Filters</span>
+                <span className="lg:hidden">Filter Options</span>
               </h2>
               <button
                 onClick={clearFilters}
-                className="text-sm text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+                className="text-sm text-blue-600 hover:text-blue-800 flex items-center space-x-1 touch-action-manipulation"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span>Clear</span>
@@ -488,84 +572,107 @@ const DataAnalysis: React.FC = () => {
         {/* Main Content */}
         <div className="lg:col-span-3 space-y-6">
           {/* Summary Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white rounded-lg shadow-md p-4">
-              <div className="flex items-center space-x-2">
-                <Target className="w-5 h-5 text-blue-600" />
-                <h3 className="font-semibold">Total Shots</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
+              <div className="flex items-center space-x-1 sm:space-x-2">
+                <Target className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
+                <h3 className="font-semibold text-xs sm:text-base">Total Shots</h3>
               </div>
-              <div className="text-2xl font-bold text-blue-600 mt-2">
+              <div className="text-lg sm:text-2xl font-bold text-blue-600 mt-1 sm:mt-2">
                 {memoizedGameStats?.totalShots || 0}
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow-md p-4">
-              <div className="flex items-center space-x-2">
-                <TrendingUp className="w-5 h-5 text-green-600" />
-                <h3 className="font-semibold">Goal %</h3>
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
+              <div className="flex items-center space-x-1 sm:space-x-2">
+                <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
+                <h3 className="font-semibold text-xs sm:text-base">Goal %</h3>
               </div>
-              <div className="text-2xl font-bold text-green-600 mt-2">
+              <div className="text-lg sm:text-2xl font-bold text-green-600 mt-1 sm:mt-2">
                 {memoizedGameStats?.goalPercentage || 0}%
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow-md p-4">
-              <div className="flex items-center space-x-2">
-                <Users className="w-5 h-5 text-purple-600" />
-                <h3 className="font-semibold">Shots/Game</h3>
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
+              <div className="flex items-center space-x-1 sm:space-x-2">
+                <Users className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
+                <h3 className="font-semibold text-xs sm:text-base">Shots/Game</h3>
               </div>
-              <div className="text-2xl font-bold text-purple-600 mt-2">
+              <div className="text-lg sm:text-2xl font-bold text-purple-600 mt-1 sm:mt-2">
                 {memoizedGameStats?.shotsPerGame || 0}
               </div>
             </div>
 
-            <div className="bg-white rounded-lg shadow-md p-4">
-              <div className="flex items-center space-x-2">
-                <Calendar className="w-5 h-5 text-orange-600" />
-                <h3 className="font-semibold">Games</h3>
+            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
+              <div className="flex items-center space-x-1 sm:space-x-2">
+                <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
+                <h3 className="font-semibold text-xs sm:text-base">Games</h3>
               </div>
-              <div className="text-2xl font-bold text-orange-600 mt-2">
+              <div className="text-lg sm:text-2xl font-bold text-orange-600 mt-1 sm:mt-2">
                 {filteredGames.length}
               </div>
             </div>
           </div>
 
           {/* Shot Chart */}
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
-              <h2 className="text-xl font-semibold mb-2 sm:mb-0">Shot Analysis</h2>
-              
-              {/* Toggle Buttons */}
-              <div className="flex rounded-lg border border-gray-300 p-1 bg-gray-50">
+          <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+            <div className="flex flex-col space-y-3 sm:space-y-0 sm:flex-row sm:justify-between sm:items-center mb-4">
+              <div className="flex items-center justify-between w-full sm:w-auto">
+                <h2 className="text-lg sm:text-xl font-semibold">Shot Analysis</h2>
+
+                {/* Export Button - Mobile */}
                 <button
-                  onClick={() => setViewMode('chart')}
-                  className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                    viewMode === 'chart'
-                      ? 'bg-blue-500 text-white'
-                      : 'text-gray-700 hover:text-blue-600'
-                  }`}
+                  onClick={handleExportPDF}
+                  className="sm:hidden bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg transition-colors touch-action-manipulation"
+                  title="Export PDF Report"
                 >
-                  Shot Chart
+                  <Download className="w-4 h-4" />
                 </button>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-3">
+                {/* Toggle Buttons - Mobile Optimized */}
+                <div className="grid grid-cols-3 sm:flex rounded-lg border border-gray-300 p-1 bg-gray-50 gap-1 sm:gap-0">
+                  <button
+                    onClick={() => setViewMode('chart')}
+                    className={`px-2 py-2 sm:px-3 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors touch-action-manipulation ${
+                      viewMode === 'chart'
+                        ? 'bg-blue-500 text-white'
+                        : 'text-gray-700 hover:text-blue-600'
+                    }`}
+                  >
+                    Chart
+                  </button>
+                  <button
+                    onClick={() => setViewMode('shot_heatmap')}
+                    className={`px-2 py-2 sm:px-3 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors touch-action-manipulation ${
+                      viewMode === 'shot_heatmap'
+                        ? 'bg-orange-500 text-white'
+                        : 'text-gray-700 hover:text-orange-600'
+                    }`}
+                  >
+                    Shots
+                  </button>
+                  <button
+                    onClick={() => setViewMode('goal_heatmap')}
+                    className={`px-2 py-2 sm:px-3 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors touch-action-manipulation ${
+                      viewMode === 'goal_heatmap'
+                        ? 'bg-red-500 text-white'
+                        : 'text-gray-700 hover:text-red-600'
+                    }`}
+                  >
+                    Goals
+                  </button>
+                </div>
+
+                {/* Export Button - Desktop */}
                 <button
-                  onClick={() => setViewMode('shot_heatmap')}
-                  className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                    viewMode === 'shot_heatmap'
-                      ? 'bg-orange-500 text-white'
-                      : 'text-gray-700 hover:text-orange-600'
-                  }`}
+                  onClick={handleExportPDF}
+                  className="hidden sm:flex items-center space-x-2 bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-lg transition-colors touch-action-manipulation"
+                  title="Export PDF Report"
                 >
-                  Shot Heatmap
-                </button>
-                <button
-                  onClick={() => setViewMode('goal_heatmap')}
-                  className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                    viewMode === 'goal_heatmap'
-                      ? 'bg-red-500 text-white'
-                      : 'text-gray-700 hover:text-red-600'
-                  }`}
-                >
-                  Goal Heatmap
+                  <FileText className="w-4 h-4" />
+                  <span className="text-sm font-medium">Export PDF</span>
                 </button>
               </div>
             </div>
@@ -575,6 +682,7 @@ const DataAnalysis: React.FC = () => {
               {/* Rink Background */}
               <div
                 ref={rinkRef}
+                data-shot-chart
                 className="relative w-full bg-center bg-contain bg-no-repeat border border-gray-300 rounded"
                 style={{
                   backgroundImage: 'url(/images/rink.png), url(/images/rink-placeholder.svg)',
@@ -810,6 +918,9 @@ const DataAnalysis: React.FC = () => {
               </div>
             ) : null;
           })()}
+
+          {/* Advanced Analytics */}
+          <AdvancedCharts shots={filteredShots} className="mb-6" />
 
           {/* Charts Row */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

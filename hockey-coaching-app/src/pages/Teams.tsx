@@ -125,7 +125,8 @@ const Teams: React.FC = () => {
       lastName: playerForm.lastName,
       jerseyNumber: parseInt(playerForm.jerseyNumber),
       position: playerForm.position,
-      teamId: selectedTeam.id
+      teamId: selectedTeam.id,
+      userId: currentUser.uid
     };
 
     await dbHelpers.createPlayer(newPlayer);

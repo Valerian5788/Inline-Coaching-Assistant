@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Users, Calendar, Play, Trophy, BarChart3, Target, LogOut, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { dbHelpers } from '../db';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -13,6 +14,31 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { currentUser, logout } = useAuth();
   const { addToast } = useToast();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [hasShots, setHasShots] = useState(false);
+
+  useEffect(() => {
+    const checkForShots = async () => {
+      try {
+        // Check if any shots exist in the database
+        const games = await dbHelpers.getAllGames().catch(() => []);
+        if (games.length === 0) {
+          setHasShots(false);
+          return;
+        }
+
+        // Check first game for shots - if any exist, show Analysis tab
+        const firstGameShots = await dbHelpers.getShotsByGame(games[0].id).catch(() => []);
+        setHasShots(firstGameShots.length > 0);
+      } catch (error) {
+        console.error('Error checking for shots:', error);
+        setHasShots(false);
+      }
+    };
+
+    if (currentUser) {
+      checkForShots();
+    }
+  }, [currentUser]);
 
   const handleLogout = async () => {
     try {
@@ -24,15 +50,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   };
 
-  const navItems = [
+  const baseNavItems = [
     { path: '/', icon: Home, label: 'Home' },
     { path: '/teams', icon: Users, label: 'Teams' },
     { path: '/seasons', icon: Trophy, label: 'Seasons' },
     { path: '/games', icon: Calendar, label: 'Games' },
     { path: '/live', icon: Play, label: 'Live Tracking' },
-    { path: '/training', icon: Target, label: 'Training' },
-    { path: '/analysis', icon: BarChart3, label: 'Analysis' }
+    { path: '/training', icon: Target, label: 'Training' }
   ];
+
+  const navItems = hasShots
+    ? [...baseNavItems, { path: '/analysis', icon: BarChart3, label: 'Analysis' }]
+    : baseNavItems;
 
   return (
     <div className="min-h-screen bg-gray-50">

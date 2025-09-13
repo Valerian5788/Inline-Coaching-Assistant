@@ -5,6 +5,7 @@ import { dbHelpers } from '../db';
 import { useAppStore } from '../stores/appStore';
 import { useGameStore } from '../stores/gameStore';
 import { useUIStore } from '../stores/uiStore';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   Calendar, 
   Plus, 
@@ -87,6 +88,7 @@ const Games: React.FC = () => {
     setCreateGameExpanded,
     setActiveFilterCount
   } = useUIStore();
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     loadData();
@@ -180,9 +182,10 @@ const Games: React.FC = () => {
 
   const handleCreateGame = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    if (!currentUser) return;
+
     const gameDateTime = new Date(`${gameForm.date}T${gameForm.time}`).toISOString();
-    
+
     const newGame: Game = {
       id: crypto.randomUUID(),
       homeTeamId: gameForm.homeTeamId,
@@ -194,7 +197,8 @@ const Games: React.FC = () => {
       periodMinutes: gameForm.periodMinutes,
       hasOvertime: gameForm.hasOvertime,
       homeScore: 0,
-      awayScore: 0
+      awayScore: 0,
+      userId: currentUser.uid
     };
 
     await dbHelpers.createGame(newGame);
@@ -270,13 +274,13 @@ const Games: React.FC = () => {
       return;
     }
 
-    if (!currentSeason || teams.length === 0) {
+    if (!currentSeason || teams.length === 0 || !currentUser) {
       alert('Please create a team and season first');
       return;
     }
 
     const gameDateTime = new Date(`${gameFromPresetForm.date}T${gameFromPresetForm.time}`).toISOString();
-    
+
     const newGame: Game = {
       id: crypto.randomUUID(),
       homeTeamId: teams[0].id, // Use first available team
@@ -288,7 +292,8 @@ const Games: React.FC = () => {
       periodMinutes: selectedPreset.periodMinutes,
       hasOvertime: selectedPreset.hasOvertime,
       homeScore: 0,
-      awayScore: 0
+      awayScore: 0,
+      userId: currentUser.uid
     };
 
     await dbHelpers.createGame(newGame);
@@ -336,11 +341,11 @@ const Games: React.FC = () => {
   };
 
   const createNewPreset = async () => {
-    if (!presetForm.name.trim()) {
+    if (!presetForm.name.trim() || !currentUser) {
       alert('Please enter a preset name');
       return;
     }
-    
+
     const newPreset: GamePreset = {
       id: crypto.randomUUID(),
       name: presetForm.name,
@@ -350,7 +355,8 @@ const Games: React.FC = () => {
       overtimeMinutes: presetForm.overtimeMinutes,
       isDefault: false,
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      userId: currentUser.uid
     };
     
     try {

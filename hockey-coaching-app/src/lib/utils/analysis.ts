@@ -177,11 +177,20 @@ export const calculateGameStats = (shots: Shot[], games: Game[]): GameStats => {
 export const getFilteredShots = async (filters: AnalysisFilters): Promise<ShotWithGame[]> => {
   // Get all games first to apply filters
   let games: Game[] = [];
-  
-  if (filters.seasonId) {
-    games = await dbHelpers.getGamesBySeason(filters.seasonId);
-  } else {
-    games = await dbHelpers.getAllGames();
+
+  try {
+    if (filters.seasonId) {
+      games = await dbHelpers.getGamesBySeason(filters.seasonId);
+    } else {
+      games = await dbHelpers.getAllGames();
+    }
+  } catch (error) {
+    console.error('Error loading games for analysis:', error);
+    return []; // Return empty array on error
+  }
+
+  if (games.length === 0) {
+    return []; // No games to analyze
   }
 
   // Apply team filter
@@ -223,25 +232,48 @@ export const getFilteredShots = async (filters: AnalysisFilters): Promise<ShotWi
 
 // Enhanced version that returns normalized shots with games
 export const getFilteredNormalizedShots = async (filters: AnalysisFilters): Promise<NormalizedShotWithGame[]> => {
-  const games = await getFilteredGames(filters);
-  const shots = await getFilteredShots(filters);
-  
-  // Normalize shots using the normalization utility
-  return normalizeShotsArray(shots, games);
+  try {
+    const games = await getFilteredGames(filters);
+    const shots = await getFilteredShots(filters);
+
+    if (games.length === 0 || shots.length === 0) {
+      return []; // No data to normalize
+    }
+
+    // Normalize shots using the normalization utility
+    return normalizeShotsArray(shots, games);
+  } catch (error) {
+    console.error('Error loading normalized shots:', error);
+    return [];
+  }
 };
 
 // Get goals against with normalization
 export const getFilteredGoalsAgainst = async (filters: AnalysisFilters) => {
-  const games = await getFilteredGames(filters);
-  const goalsAgainst: GoalAgainst[] = [];
-  
-  for (const game of games) {
-    const gameGoalsAgainst = await dbHelpers.getGoalsAgainstByGame(game.id);
-    goalsAgainst.push(...gameGoalsAgainst);
+  try {
+    const games = await getFilteredGames(filters);
+    const goalsAgainst: GoalAgainst[] = [];
+
+    if (games.length === 0) {
+      return []; // No games to analyze
+    }
+
+    for (const game of games) {
+      try {
+        const gameGoalsAgainst = await dbHelpers.getGoalsAgainstByGame(game.id);
+        goalsAgainst.push(...gameGoalsAgainst);
+      } catch (error) {
+        console.error(`Error loading goals against for game ${game.id}:`, error);
+        // Continue with other games
+      }
+    }
+
+    // Normalize goals against
+    return goalsAgainst.map(goal => normalizeGoalAgainst(goal, games.find(g => g.id === goal.gameId)!));
+  } catch (error) {
+    console.error('Error loading goals against:', error);
+    return [];
   }
-  
-  // Normalize goals against
-  return goalsAgainst.map(goal => normalizeGoalAgainst(goal, games.find(g => g.id === goal.gameId)!));
 };
 
 // Enhanced shot color with danger level
@@ -264,11 +296,20 @@ export const getEnhancedShotColor = (result: Shot['result'], dangerLevel?: 'high
 
 export const getFilteredGames = async (filters: AnalysisFilters): Promise<Game[]> => {
   let games: Game[] = [];
-  
-  if (filters.seasonId) {
-    games = await dbHelpers.getGamesBySeason(filters.seasonId);
-  } else {
-    games = await dbHelpers.getAllGames();
+
+  try {
+    if (filters.seasonId) {
+      games = await dbHelpers.getGamesBySeason(filters.seasonId);
+    } else {
+      games = await dbHelpers.getAllGames();
+    }
+  } catch (error) {
+    console.error('Error loading games for analysis:', error);
+    return []; // Return empty array on error
+  }
+
+  if (games.length === 0) {
+    return []; // No games to filter
   }
 
   // Apply filters
