@@ -7,28 +7,36 @@ import type { Shot } from '../../types';
 const QuickStats: React.FC = () => {
   const navigate = useNavigate();
   const { currentGame, shots: allShots, events, isTracking } = useGameStore();
-  const [currentPeriodShots, setCurrentPeriodShots] = useState<Shot[]>([]);
+  const [displayedShots, setDisplayedShots] = useState<Shot[]>([]);
   const [faceoffStats, setFaceoffStats] = useState({ wins: 0, losses: 0 });
+  const [selectedPeriod, setSelectedPeriod] = useState<number | 'all'>('all');
 
   useEffect(() => {
     if (!currentGame) return;
-    
-    const currentPeriod = currentGame.currentPeriod || 1;
-    
-    // Filter shots for current period
-    const periodShots = allShots.filter(shot => shot.period === currentPeriod);
-    setCurrentPeriodShots(periodShots);
-    
-    // Calculate faceoff stats for current period
-    const periodFaceoffs = events.filter(event => 
-      event.period === currentPeriod && 
-      (event.type === 'faceoff_won' || event.type === 'faceoff_lost')
-    );
-    
-    const wins = periodFaceoffs.filter(event => event.type === 'faceoff_won').length;
-    const losses = periodFaceoffs.filter(event => event.type === 'faceoff_lost').length;
+
+    // Filter shots and faceoffs based on selected period
+    let filteredShots: Shot[];
+    let filteredEvents;
+
+    if (selectedPeriod === 'all') {
+      filteredShots = allShots;
+      filteredEvents = events.filter(event =>
+        event.type === 'faceoff_won' || event.type === 'faceoff_lost'
+      );
+    } else {
+      filteredShots = allShots.filter(shot => shot.period === selectedPeriod);
+      filteredEvents = events.filter(event =>
+        event.period === selectedPeriod &&
+        (event.type === 'faceoff_won' || event.type === 'faceoff_lost')
+      );
+    }
+
+    setDisplayedShots(filteredShots);
+
+    const wins = filteredEvents.filter(event => event.type === 'faceoff_won').length;
+    const losses = filteredEvents.filter(event => event.type === 'faceoff_lost').length;
     setFaceoffStats({ wins, losses });
-  }, [currentGame, allShots, events]);
+  }, [currentGame, allShots, events, selectedPeriod]);
 
   // Auto-refresh every 5 seconds if game is live
   useEffect(() => {
@@ -48,8 +56,8 @@ const QuickStats: React.FC = () => {
   }
 
   const currentPeriod = currentGame.currentPeriod || 1;
-  const ourGoals = currentPeriodShots.filter(shot => shot.result === 'goal').length;
-  const ourTotalShots = currentPeriodShots.length;
+  const ourGoals = displayedShots.filter(shot => shot.result === 'goal').length;
+  const ourTotalShots = displayedShots.length;
   
   const shootingPercentage = ourTotalShots > 0 ? (ourGoals / ourTotalShots) * 100 : 0;
   const faceoffTotal = faceoffStats.wins + faceoffStats.losses;
@@ -71,14 +79,13 @@ const QuickStats: React.FC = () => {
         </div>
 
         {/* Our shots (blue dots, goals are larger) */}
-        {currentPeriodShots.map((shot) => {
-          console.log('QuickStats displaying shot:', {x: shot.x, y: shot.y, result: shot.result});
+        {displayedShots.map((shot) => {
           return (
             <div
               key={shot.id}
               className={`absolute rounded-full ${
-                shot.result === 'goal' 
-                  ? 'w-4 h-4 bg-blue-600' 
+                shot.result === 'goal'
+                  ? 'w-4 h-4 bg-blue-600'
                   : 'w-2 h-2 bg-blue-400'
               }`}
               style={{
@@ -105,13 +112,65 @@ const QuickStats: React.FC = () => {
           <ArrowLeft className="w-6 h-6" />
           <span>Back to Game</span>
         </button>
-        <h1 className="text-2xl font-bold">Period {currentPeriod} Stats</h1>
+        <h1 className="text-2xl font-bold">
+          {selectedPeriod === 'all' ? 'Game Stats' : `Period ${selectedPeriod} Stats`}
+        </h1>
         <div className="w-32"></div> {/* Spacer */}
+      </div>
+
+      {/* Period Filter Buttons */}
+      <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
+        <div className="flex justify-center space-x-2">
+          <button
+            onClick={() => setSelectedPeriod('all')}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              selectedPeriod === 'all'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            All Game
+          </button>
+          <button
+            onClick={() => setSelectedPeriod(1)}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              selectedPeriod === 1
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            Period 1
+          </button>
+          <button
+            onClick={() => setSelectedPeriod(2)}
+            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+              selectedPeriod === 2
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            Period 2
+          </button>
+          {currentGame.hasOvertime && currentPeriod > 2 && (
+            <button
+              onClick={() => setSelectedPeriod(3)}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                selectedPeriod === 3
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              OT
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Shot Count - Large and prominent */}
       <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-        <h2 className="text-xl font-semibold text-center mb-4">Our Shots This Period</h2>
+        <h2 className="text-xl font-semibold text-center mb-4">
+          Our Shots {selectedPeriod === 'all' ? 'This Game' : `Period ${selectedPeriod}`}
+        </h2>
         <div className="text-center">
           <div className="text-6xl font-bold text-blue-600 mb-2">{ourTotalShots}</div>
           <div className="text-xl text-gray-600">Total Shots</div>
