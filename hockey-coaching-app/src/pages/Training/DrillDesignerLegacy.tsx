@@ -271,6 +271,7 @@ const DrillDesigner: React.FC = () => {
       category: drillCategory,
       elements,
       description: drillDescription.trim(),
+      userId: 'current-user', // Will be set by Firebase auth
       createdAt: id ? (await dbHelpers.getDrillById(id))?.createdAt || new Date().toISOString() : new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };

@@ -1,5 +1,4 @@
-import { dbHelpers } from '../db';
-import type { GamePreset } from '../types';
+// Firebase initialization utilities
 
 /**
  * Initialize Firebase with default data when the app first runs

@@ -15,9 +15,9 @@ export const Login: React.FC = () => {
     setLoading(true);
     try {
       await signInWithGoogle();
-      if (addToast) addToast('Successfully signed in with Google!', 'success');
+      if (addToast) addToast('success', 'Successfully signed in with Google!');
     } catch (error: any) {
-      if (addToast) addToast(error.message || 'Failed to sign in with Google', 'error');
+      if (addToast) addToast('error', error.message || 'Failed to sign in with Google');
       console.error('Google sign-in error:', error);
     } finally {
       setLoading(false);
@@ -27,7 +27,7 @@ export const Login: React.FC = () => {
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      if (addToast) addToast('Please fill in all required fields', 'error');
+      if (addToast) addToast('error', 'Please fill in all required fields');
       return;
     }
 
@@ -35,14 +35,14 @@ export const Login: React.FC = () => {
     try {
       if (isSignUp) {
         if (!displayName) {
-          if (addToast) addToast('Please enter your name', 'error');
+          if (addToast) addToast('error', 'Please enter your name');
           return;
         }
         await signUpWithEmail(email, password, displayName);
-        if (addToast) addToast('Account created successfully!', 'success');
+        if (addToast) addToast('success', 'Account created successfully!');
       } else {
         await signInWithEmail(email, password);
-        if (addToast) addToast('Successfully signed in!', 'success');
+        if (addToast) addToast('success', 'Successfully signed in!');
       }
     } catch (error: any) {
       if (addToast) addToast(error.message || 'Authentication failed', 'error');

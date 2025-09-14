@@ -42,10 +42,6 @@ const Teams: React.FC = () => {
     }
   }, [selectedTeam]);
 
-  const loadTeams = async () => {
-    const allTeams = await dbHelpers.getAllTeams();
-    setTeams(allTeams);
-  };
 
   const loadPlayers = async (teamId: string) => {
     const teamPlayers = await dbHelpers.getPlayersByTeam(teamId);
@@ -117,7 +113,7 @@ const Teams: React.FC = () => {
 
   const handleCreatePlayer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTeam) return;
+    if (!selectedTeam || !currentUser) return;
 
     const newPlayer: Player = {
       id: crypto.randomUUID(),

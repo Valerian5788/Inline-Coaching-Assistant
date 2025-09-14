@@ -16,6 +16,7 @@ interface ToastContextValue {
   showError: (message: string, duration?: number) => void;
   showWarning: (message: string, duration?: number) => void;
   showInfo: (message: string, duration?: number) => void;
+  addToast: (type: ToastType, message: string, duration?: number) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
@@ -56,7 +57,7 @@ export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
 
   return (
     <ToastContext.Provider 
-      value={{ showToast, showSuccess, showError, showWarning, showInfo }}
+      value={{ showToast, showSuccess, showError, showWarning, showInfo, addToast: showToast }}
     >
       {children}
       

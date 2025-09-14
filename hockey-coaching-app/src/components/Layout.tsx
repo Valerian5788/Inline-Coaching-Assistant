@@ -61,9 +61,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const handleLogout = async () => {
     try {
       await logout();
-      if (addToast) addToast('Successfully logged out', 'success');
+      if (addToast) addToast('success', 'Successfully logged out');
     } catch (error: any) {
-      if (addToast) addToast(error.message || 'Failed to logout', 'error');
+      if (addToast) addToast('error', error.message || 'Failed to logout');
       console.error('Logout error:', error);
     }
   };
