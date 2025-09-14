@@ -242,11 +242,17 @@ const DataAnalysis: React.FC = () => {
     loadInitialData();
   }, []);
 
+  // Initial data fetch after component loads
   useEffect(() => {
     if (!loading) {
       applyFilters();
     }
-  }, [filters, loading]); // applyFilters is stable function
+  }, []); // Run once after initial load
+
+  // Filter changes trigger new data fetch
+  useEffect(() => {
+    applyFilters();
+  }, [filters]); // Only when filters change
 
   // Generate heatmap/splash zones when view mode or data changes
   useEffect(() => {

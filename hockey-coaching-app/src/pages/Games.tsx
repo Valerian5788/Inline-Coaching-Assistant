@@ -25,6 +25,34 @@ import {
   ChevronUp
 } from 'lucide-react';
 
+// Default game presets (in-memory, not stored in Firebase)
+const DEFAULT_PRESETS: GamePreset[] = [
+  {
+    id: 'default-senior',
+    name: 'Senior Game',
+    periods: 2,
+    periodMinutes: 25,
+    hasOvertime: true,
+    overtimeMinutes: 5,
+    isDefault: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    userId: '' // No userId for default presets
+  },
+  {
+    id: 'default-junior',
+    name: 'Junior Game',
+    periods: 2,
+    periodMinutes: 20,
+    hasOvertime: false,
+    overtimeMinutes: 0,
+    isDefault: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    userId: '' // No userId for default presets
+  }
+];
+
 const Games: React.FC = () => {
   const navigate = useNavigate();
   const [games, setGames] = useState<Game[]>([]);
@@ -130,7 +158,13 @@ const Games: React.FC = () => {
       setGames(allGames);
       setTeams(allTeams);
       setSeasons(allSeasons);
-      setGamePresets(allPresets);
+
+      // Combine default presets with user's custom presets
+      const combinedPresets = [
+        ...DEFAULT_PRESETS,
+        ...allPresets // User's custom presets from Firebase
+      ];
+      setGamePresets(combinedPresets);
       
       // Set default season to active season
       if (currentSeason) {
@@ -312,16 +346,36 @@ const Games: React.FC = () => {
   };
 
   const savePreset = async () => {
-    if (!presetToEdit) return;
-    
+    if (!presetToEdit || !currentUser) return;
+
     try {
-      await dbHelpers.updateGamePreset(presetToEdit.id, {
-        name: presetForm.name,
-        periods: presetForm.periods,
-        periodMinutes: presetForm.periodMinutes,
-        hasOvertime: presetForm.hasOvertime,
-        overtimeMinutes: presetForm.overtimeMinutes
-      });
+      // Check if it's a default preset (starts with 'default-')
+      if (presetToEdit.id.startsWith('default-')) {
+        // Create a new custom preset instead of updating the default one
+        const newPreset: GamePreset = {
+          id: crypto.randomUUID(),
+          name: presetForm.name,
+          periods: presetForm.periods,
+          periodMinutes: presetForm.periodMinutes,
+          hasOvertime: presetForm.hasOvertime,
+          overtimeMinutes: presetForm.overtimeMinutes,
+          isDefault: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          userId: currentUser.uid
+        };
+
+        await dbHelpers.createGamePreset(newPreset);
+      } else {
+        // Update existing custom preset
+        await dbHelpers.updateGamePreset(presetToEdit.id, {
+          name: presetForm.name,
+          periods: presetForm.periods,
+          periodMinutes: presetForm.periodMinutes,
+          hasOvertime: presetForm.hasOvertime,
+          overtimeMinutes: presetForm.overtimeMinutes
+        });
+      }
       
       setShowEditPresetModal(false);
       setPresetToEdit(null);

@@ -120,22 +120,26 @@ export const firebaseDbHelpers = {
   },
 
   async deleteTeam(id: string): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
     const batch = writeBatch(db);
-    
+
     // Delete the team
     const teamRef = doc(db, COLLECTIONS.teams, id);
     batch.delete(teamRef);
-    
-    // Delete all players from this team
+
+    // Delete all players from this team with userId filter
     const playersQuery = query(
       collection(db, COLLECTIONS.players),
-      where('teamId', '==', id)
+      where('teamId', '==', id),
+      where('userId', '==', userId)
     );
     const playersSnapshot = await getDocs(playersQuery);
     playersSnapshot.docs.forEach(playerDoc => {
       batch.delete(playerDoc.ref);
     });
-    
+
     await batch.commit();
   },
 
@@ -241,22 +245,26 @@ export const firebaseDbHelpers = {
   },
 
   async deleteSeason(id: string): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
     const batch = writeBatch(db);
-    
+
     // Delete the season
     const seasonRef = doc(db, COLLECTIONS.seasons, id);
     batch.delete(seasonRef);
-    
-    // Delete all games from this season
+
+    // Delete all games from this season with userId filter
     const gamesQuery = query(
       collection(db, COLLECTIONS.games),
-      where('seasonId', '==', id)
+      where('seasonId', '==', id),
+      where('userId', '==', userId)
     );
     const gamesSnapshot = await getDocs(gamesQuery);
     gamesSnapshot.docs.forEach(gameDoc => {
       batch.delete(gameDoc.ref);
     });
-    
+
     await batch.commit();
   },
 
@@ -356,14 +364,16 @@ export const firebaseDbHelpers = {
 
     const q = query(
       collection(db, COLLECTIONS.games),
-      where('userId', '==', userId),
-      orderBy('date', 'desc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const games = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as Game[];
+
+    // Sort client-side instead of server-side
+    return games.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
   async getGamesBySeason(seasonId: string): Promise<Game[]> {
@@ -386,13 +396,21 @@ export const firebaseDbHelpers = {
   },
 
   async getGameById(id: string): Promise<Game | undefined> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return undefined;
+
     const docRef = doc(db, COLLECTIONS.games, id);
     const docSnap = await getDoc(docRef);
-    
+
     if (docSnap.exists()) {
+      const gameData = docSnap.data();
+      // Check if the game belongs to the current user
+      if (gameData.userId !== userId) {
+        return undefined;
+      }
       return {
         id: docSnap.id,
-        ...convertTimestamps(docSnap.data())
+        ...convertTimestamps(gameData)
       } as Game;
     }
     return undefined;
@@ -419,23 +437,30 @@ export const firebaseDbHelpers = {
   },
 
   async deleteGame(id: string): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
     const batch = writeBatch(db);
-    
+
     // Delete the game
     const gameRef = doc(db, COLLECTIONS.games, id);
     batch.delete(gameRef);
-    
-    // Delete related data
+
+    // Delete related data with userId filter
     const relatedCollections = [COLLECTIONS.shots, COLLECTIONS.goalsAgainst, COLLECTIONS.gameEvents, COLLECTIONS.tacticalDrawings];
-    
+
     for (const collectionName of relatedCollections) {
-      const q = query(collection(db, collectionName), where('gameId', '==', id));
+      const q = query(
+        collection(db, collectionName),
+        where('gameId', '==', id),
+        where('userId', '==', userId)
+      );
       const snapshot = await getDocs(q);
       snapshot.docs.forEach(doc => {
         batch.delete(doc.ref);
       });
     }
-    
+
     await batch.commit();
   },
 
@@ -443,23 +468,33 @@ export const firebaseDbHelpers = {
   // SHOTS
   // ==========================================
   async getShotsByGame(gameId: string): Promise<Shot[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.shots),
       where('gameId', '==', gameId),
-      orderBy('timestamp', 'asc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const shots = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as Shot[];
+
+    // Sort client-side to avoid composite index
+    return shots.sort((a, b) => a.timestamp - b.timestamp);
   },
 
   async createShot(shot: Shot): Promise<string> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) throw new Error('User must be authenticated');
+
     const { id, ...shotData } = shot;
     const docRef = doc(db, COLLECTIONS.shots, id);
     await setDoc(docRef, {
       ...shotData,
+      userId,
       createdAt: serverTimestamp()
     });
     return id;
@@ -483,23 +518,33 @@ export const firebaseDbHelpers = {
   // GOALS AGAINST
   // ==========================================
   async getGoalsAgainstByGame(gameId: string): Promise<GoalAgainst[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.goalsAgainst),
       where('gameId', '==', gameId),
-      orderBy('timestamp', 'asc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const goals = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as GoalAgainst[];
+
+    // Sort client-side to avoid composite index
+    return goals.sort((a, b) => a.timestamp - b.timestamp);
   },
 
   async createGoalAgainst(goal: GoalAgainst): Promise<string> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) throw new Error('User must be authenticated');
+
     const { id, ...goalData } = goal;
     const docRef = doc(db, COLLECTIONS.goalsAgainst, id);
     await setDoc(docRef, {
       ...goalData,
+      userId,
       createdAt: serverTimestamp()
     });
     return id;
@@ -523,23 +568,33 @@ export const firebaseDbHelpers = {
   // GAME EVENTS
   // ==========================================
   async getEventsByGame(gameId: string): Promise<GameEvent[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.gameEvents),
       where('gameId', '==', gameId),
-      orderBy('timestamp', 'asc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const events = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as GameEvent[];
+
+    // Sort client-side to avoid composite index
+    return events.sort((a, b) => a.timestamp - b.timestamp);
   },
 
   async createGameEvent(event: GameEvent): Promise<string> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) throw new Error('User must be authenticated');
+
     const { id, ...eventData } = event;
     const docRef = doc(db, COLLECTIONS.gameEvents, id);
     await setDoc(docRef, {
       ...eventData,
+      userId,
       createdAt: serverTimestamp()
     });
     return id;
@@ -560,9 +615,13 @@ export const firebaseDbHelpers = {
   },
 
   async deleteGameEventsByGame(gameId: string): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
     const q = query(
       collection(db, COLLECTIONS.gameEvents),
-      where('gameId', '==', gameId)
+      where('gameId', '==', gameId),
+      where('userId', '==', userId)
     );
     const snapshot = await getDocs(q);
     const batch = writeBatch(db);
@@ -718,16 +777,22 @@ export const firebaseDbHelpers = {
   // TACTICAL DRAWINGS
   // ==========================================
   async getTacticalDrawingsByGame(gameId: string): Promise<TacticalDrawing[]> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return [];
+
     const q = query(
       collection(db, COLLECTIONS.tacticalDrawings),
       where('gameId', '==', gameId),
-      orderBy('timestamp', 'desc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const drawings = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...convertTimestamps(doc.data())
     })) as TacticalDrawing[];
+
+    // Sort client-side to avoid composite index
+    return drawings.sort((a, b) => b.timestamp - a.timestamp);
   },
 
   async getTacticalDrawingById(id: string): Promise<TacticalDrawing | undefined> {
@@ -768,9 +833,13 @@ export const firebaseDbHelpers = {
   },
 
   async deleteTacticalDrawingsByGame(gameId: string): Promise<void> {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
     const q = query(
       collection(db, COLLECTIONS.tacticalDrawings),
-      where('gameId', '==', gameId)
+      where('gameId', '==', gameId),
+      where('userId', '==', userId)
     );
     const snapshot = await getDocs(q);
     const batch = writeBatch(db);
@@ -789,8 +858,7 @@ export const firebaseDbHelpers = {
 
     const q = query(
       collection(db, COLLECTIONS.gamePresets),
-      where('userId', '==', userId),
-      orderBy('name', 'asc')
+      where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
     const presets = querySnapshot.docs.map(doc => ({
@@ -798,7 +866,7 @@ export const firebaseDbHelpers = {
       ...convertTimestamps(doc.data())
     })) as GamePreset[];
 
-    // Sort with default presets first
+    // Sort client-side with default presets first
     return presets.sort((a, b) => {
       if (a.isDefault !== b.isDefault) {
         return a.isDefault ? -1 : 1;

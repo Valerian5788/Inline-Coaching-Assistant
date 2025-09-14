@@ -6,8 +6,18 @@ import { dbHelpers } from '../db';
 interface GameStore extends GameState {
   // Timer
   timerInterval: NodeJS.Timeout | null;
+  // Local-first sync
+  pendingChanges: {
+    shots: boolean;
+    goalsAgainst: boolean;
+    events: boolean;
+    gameState: boolean;
+  };
+  lastSyncTime: number | null;
+  isSyncing: boolean;
   // Actions
   setCurrentGame: (game: Game | null) => void;
+  syncToFirebase: () => Promise<void>;
   startTracking: () => void;
   stopTracking: () => void;
   pauseTracking: () => void;
@@ -55,6 +65,15 @@ export const useGameStore = create<GameStore>()(
       goalsAgainst: [],
       events: [],
       timerInterval: null,
+      // Local-first sync state
+      pendingChanges: {
+        shots: false,
+        goalsAgainst: false,
+        events: false,
+        gameState: false
+      },
+      lastSyncTime: null,
+      isSyncing: false,
 
       // Actions
       setCurrentGame: (game) => set({ currentGame: game }),
@@ -71,7 +90,27 @@ export const useGameStore = create<GameStore>()(
         const newInterval = setInterval(() => {
           const { isPaused, currentGame } = get();
           if (!isPaused && currentGame) {
-            set(state => ({ gameTime: state.gameTime + 1 }));
+            const newGameTime = get().gameTime + 1;
+
+            // Check if period should end automatically
+            const periodLength = currentGame.periodMinutes * 60;
+            const currentPeriod = currentGame.currentPeriod || 1;
+            const periodStartTime = (currentPeriod - 1) * periodLength;
+            const periodElapsed = newGameTime - periodStartTime;
+
+            // Auto-pause when period ends
+            if (periodElapsed >= periodLength) {
+              clearInterval(newInterval);
+              set({
+                gameTime: newGameTime,
+                isTracking: false,
+                isPaused: false,
+                timerInterval: null
+              });
+              console.log(`Period ${currentPeriod} completed - timer auto-stopped`);
+            } else {
+              set({ gameTime: newGameTime });
+            }
           }
         }, 1000);
         
@@ -103,52 +142,171 @@ export const useGameStore = create<GameStore>()(
 
       resumeTracking: () => set({ isPaused: false }),
 
+      // Sync pending changes to Firebase
+      syncToFirebase: async () => {
+        const {
+          currentGame,
+          shots,
+          goalsAgainst,
+          events,
+          pendingChanges,
+          isSyncing
+        } = get();
+
+        if (!currentGame || isSyncing) return;
+
+        set({ isSyncing: true });
+
+        try {
+          console.log('🔄 Syncing to Firebase...', pendingChanges);
+
+          // Sync shots
+          if (pendingChanges.shots && shots.length > 0) {
+            const unsyncedShots = shots.filter((shot: any) => !shot.synced);
+            if (unsyncedShots.length > 0) {
+              await Promise.all(
+                unsyncedShots.map((shot: any) => {
+                  const { synced, ...shotToSync } = shot;
+                  return dbHelpers.createShot(shotToSync);
+                })
+              );
+              // Mark shots as synced
+              const syncedShots = shots.map((shot: any) => ({ ...shot, synced: true }));
+              set({ shots: syncedShots });
+            }
+          }
+
+          // Sync goals against
+          if (pendingChanges.goalsAgainst && goalsAgainst.length > 0) {
+            const unsyncedGoals = goalsAgainst.filter((goal: any) => !goal.synced);
+            if (unsyncedGoals.length > 0) {
+              await Promise.all(
+                unsyncedGoals.map((goal: any) => {
+                  const { synced, ...goalToSync } = goal;
+                  return dbHelpers.createGoalAgainst(goalToSync);
+                })
+              );
+              // Mark goals as synced
+              const syncedGoals = goalsAgainst.map((goal: any) => ({ ...goal, synced: true }));
+              set({ goalsAgainst: syncedGoals });
+            }
+          }
+
+          // Sync events
+          if (pendingChanges.events && events.length > 0) {
+            const unsyncedEvents = events.filter((event: any) => !event.synced);
+            if (unsyncedEvents.length > 0) {
+              await Promise.all(
+                unsyncedEvents.map((event: any) => {
+                  const { synced, ...eventToSync } = event;
+                  return dbHelpers.createGameEvent(eventToSync);
+                })
+              );
+              // Mark events as synced
+              const syncedEvents = events.map((event: any) => ({ ...event, synced: true }));
+              set({ events: syncedEvents });
+            }
+          }
+
+          // Sync game state
+          if (pendingChanges.gameState) {
+            const gameUpdates: any = {
+              currentPeriod: currentGame.currentPeriod,
+              homeScore: currentGame.homeScore,
+              awayScore: currentGame.awayScore,
+              status: currentGame.status
+            };
+
+            // Only include teamSide if it's defined
+            if (currentGame.teamSide !== undefined) {
+              gameUpdates.teamSide = currentGame.teamSide;
+            }
+
+            await dbHelpers.updateGame(currentGame.id, gameUpdates);
+          }
+
+          // Clear pending changes
+          set({
+            pendingChanges: {
+              shots: false,
+              goalsAgainst: false,
+              events: false,
+              gameState: false
+            },
+            lastSyncTime: Date.now(),
+            isSyncing: false
+          });
+
+          console.log('✅ Sync completed successfully');
+        } catch (error) {
+          console.error('❌ Sync failed:', error);
+          set({ isSyncing: false });
+          throw error;
+        }
+      },
+
       addShot: async (shotData) => {
-        const { currentGame, shots } = get();
+        const { currentGame, shots, pendingChanges } = get();
         if (!currentGame) return;
 
         const shot: Shot = {
           id: crypto.randomUUID(),
           gameId: currentGame.id,
           timestamp: Date.now(),
+          synced: false, // Mark as unsynced
           ...shotData
         };
 
-        await dbHelpers.createShot(shot);
-        set({ shots: [...shots, shot] });
+        // Store locally only - Firebase sync happens later
+        set({
+          shots: [...shots, shot],
+          pendingChanges: { ...pendingChanges, shots: true }
+        });
       },
 
       addGoalAgainst: async (goalData) => {
-        const { currentGame, goalsAgainst } = get();
+        const { currentGame, goalsAgainst, pendingChanges } = get();
         if (!currentGame) return;
 
         const goal: GoalAgainst = {
           id: crypto.randomUUID(),
           gameId: currentGame.id,
           timestamp: Date.now(),
+          synced: false, // Mark as unsynced
           ...goalData
         };
 
-        await dbHelpers.createGoalAgainst(goal);
-        set({ goalsAgainst: [...goalsAgainst, goal] });
+        // Store locally only - Firebase sync happens later
+        set({
+          goalsAgainst: [...goalsAgainst, goal],
+          pendingChanges: { ...pendingChanges, goalsAgainst: true }
+        });
       },
 
       updateGameScore: async (homeScore, awayScore) => {
-        const { currentGame } = get();
+        const { currentGame, pendingChanges } = get();
         if (!currentGame) return;
 
         const updatedGame = { ...currentGame, homeScore, awayScore };
-        await dbHelpers.updateGame(currentGame.id, { homeScore, awayScore });
-        set({ currentGame: updatedGame });
+
+        // Store locally only - Firebase sync happens later
+        set({
+          currentGame: updatedGame,
+          pendingChanges: { ...pendingChanges, gameState: true }
+        });
       },
 
       updateGamePeriod: async (period, teamSide) => {
-        const { currentGame } = get();
+        const { currentGame, pendingChanges } = get();
         if (!currentGame) return;
 
         const updatedGame = { ...currentGame, currentPeriod: period, teamSide };
-        await dbHelpers.updateGame(currentGame.id, { currentPeriod: period, teamSide });
-        set({ currentGame: updatedGame });
+
+        // Store locally only - Firebase sync happens later
+        set({
+          currentGame: updatedGame,
+          pendingChanges: { ...pendingChanges, gameState: true }
+        });
       },
 
       loadGameData: async (gameId) => {
@@ -189,28 +347,39 @@ export const useGameStore = create<GameStore>()(
 
       // Game management functions
       initializeLiveGame: async (game) => {
-        // Set game status to live
-        await dbHelpers.updateGame(game.id, { status: 'live', currentPeriod: 1, homeScore: 0, awayScore: 0 });
         const updatedGame = { ...game, status: 'live' as const, currentPeriod: 1, homeScore: 0, awayScore: 0 };
-        
+
         // Load game data but don't start timer automatically
         await get().loadGameData(game.id);
-        set({ 
+        set({
           currentGame: updatedGame,
           gameTime: 0,
           isTracking: false,
-          isPaused: true
+          isPaused: true,
+          // Mark game state as needing sync
+          pendingChanges: {
+            shots: false,
+            goalsAgainst: false,
+            events: false,
+            gameState: true // Game status changed to 'live'
+          }
         });
-        
-        // Add game start event but don't auto-start timer
+
+        // Add game start event but don't auto-start timer (now local-first)
         await get().addGameEvent('game_start', 'Game started');
       },
 
       updateGameStatus: async (gameId, status) => {
-        await dbHelpers.updateGame(gameId, { status });
-        const { currentGame } = get();
+        const { currentGame, pendingChanges } = get();
         if (currentGame && currentGame.id === gameId) {
-          set({ currentGame: { ...currentGame, status } });
+          // Local-first: store status change locally, sync later
+          set({
+            currentGame: { ...currentGame, status },
+            pendingChanges: { ...pendingChanges, gameState: true }
+          });
+        } else {
+          // If not current game, sync immediately
+          await dbHelpers.updateGame(gameId, { status });
         }
       },
 
@@ -220,15 +389,24 @@ export const useGameStore = create<GameStore>()(
 
         // Add game end event
         await get().addGameEvent('game_end', 'Game ended');
-        
+
         // Stop timer
         if (timerInterval) {
           clearInterval(timerInterval);
         }
 
-        // Update game status to archived
+        // Final sync to Firebase before archiving
+        console.log('🔄 Game ended - Final sync to Firebase...');
+        try {
+          await get().syncToFirebase();
+          console.log('✅ Final game sync completed');
+        } catch (error) {
+          console.error('❌ Final game sync failed:', error);
+        }
+
+        // Update game status to archived (direct Firebase call)
         await dbHelpers.updateGame(currentGame.id, { status: 'archived' });
-        
+
         // Stop tracking and clear data
         set({
           currentGame: { ...currentGame, status: 'archived' },
@@ -279,17 +457,28 @@ export const useGameStore = create<GameStore>()(
 
         // Add period end event
         await get().addGameEvent('period_end', `Period ${currentGame.currentPeriod} ended`);
-        
+
         set({
           isTracking: false,
           isPaused: false,
           timerInterval: null
         });
+
+        // Sync to Firebase after period 1 ends
+        if (currentGame.currentPeriod === 1) {
+          console.log('🔄 Period 1 ended - Syncing to Firebase...');
+          try {
+            await get().syncToFirebase();
+            console.log('✅ Period 1 sync completed');
+          } catch (error) {
+            console.error('❌ Period 1 sync failed:', error);
+          }
+        }
       },
 
       // Event management
       addGameEvent: async (type, description, data = null) => {
-        const { currentGame, gameTime, events } = get();
+        const { currentGame, gameTime, events, pendingChanges } = get();
         if (!currentGame) return;
 
         const event: GameEvent = {
@@ -300,11 +489,15 @@ export const useGameStore = create<GameStore>()(
           gameTime,
           timestamp: Date.now(),
           description,
-          data
+          data,
+          synced: false // Mark as unsynced
         };
 
-        await dbHelpers.createGameEvent(event);
-        set({ events: [...events, event] });
+        // Store locally only - Firebase sync happens later
+        set({
+          events: [...events, event],
+          pendingChanges: { ...pendingChanges, events: true }
+        });
       },
 
       // Score management

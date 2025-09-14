@@ -69,6 +69,7 @@ export interface Shot {
   y: number; // Rink coordinates
   result: ShotResult;
   teamSide: TeamSide;
+  synced?: boolean; // For local-first sync tracking
 }
 
 export interface GoalAgainst {
@@ -79,6 +80,7 @@ export interface GoalAgainst {
   x: number; // Rink coordinates
   y: number; // Rink coordinates
   reason?: string;
+  synced?: boolean; // For local-first sync tracking
 }
 
 export type GameEventType = 'period_start' | 'period_end' | 'goal_home' | 'goal_away' | 'timeout' | 'penalty' | 'game_start' | 'game_end' | 'faceoff_won' | 'faceoff_lost' | 'tactical_drawing';
@@ -92,6 +94,7 @@ export interface GameEvent {
   timestamp: number; // Unix timestamp when event occurred
   description: string;
   data?: any; // Additional event-specific data
+  synced?: boolean; // For local-first sync tracking
 }
 
 export interface GameState {
@@ -267,5 +270,6 @@ export interface GamePreset {
   isDefault: boolean; // True for system presets (Senior/Junior), false for user-created
   createdAt: string;
   updatedAt: string;
+  userId?: string; // Owner of this preset (not required for default presets)
 }
 

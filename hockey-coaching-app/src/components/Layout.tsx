@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Home, Users, Calendar, Play, Trophy, BarChart3, Target, LogOut, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useGameStore } from '../stores/gameStore';
 import { dbHelpers } from '../db';
 
 interface LayoutProps {
@@ -13,22 +14,39 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const { currentUser, logout } = useAuth();
   const { addToast } = useToast();
+  const { shots: localShots } = useGameStore();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [hasShots, setHasShots] = useState(false);
+
+  // Use length instead of array reference to avoid infinite loops
+  const localShotsCount = localShots.length;
 
   useEffect(() => {
     const checkForShots = async () => {
       try {
-        // Check if any shots exist in the database
+        // First check if there are local shots in the game store
+        if (localShotsCount > 0) {
+          setHasShots(true);
+          return;
+        }
+
+        // Then check if any shots exist in Firebase
         const games = await dbHelpers.getAllGames().catch(() => []);
         if (games.length === 0) {
           setHasShots(false);
           return;
         }
 
-        // Check first game for shots - if any exist, show Analysis tab
-        const firstGameShots = await dbHelpers.getShotsByGame(games[0].id).catch(() => []);
-        setHasShots(firstGameShots.length > 0);
+        // Check all games for shots - if any exist, show Analysis tab
+        let foundShots = false;
+        for (const game of games) {
+          const gameShots = await dbHelpers.getShotsByGame(game.id).catch(() => []);
+          if (gameShots.length > 0) {
+            foundShots = true;
+            break;
+          }
+        }
+        setHasShots(foundShots);
       } catch (error) {
         console.error('Error checking for shots:', error);
         setHasShots(false);
@@ -38,7 +56,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     if (currentUser) {
       checkForShots();
     }
-  }, [currentUser]);
+  }, [currentUser, localShotsCount]);
 
   const handleLogout = async () => {
     try {
