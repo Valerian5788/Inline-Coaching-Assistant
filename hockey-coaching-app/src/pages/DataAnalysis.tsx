@@ -1,38 +1,63 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import type { Team, Season, Game, AnalysisFilters, ShotWithGame } from '../types';
+import type { Team, Season, Game, AnalysisFilters, ShotWithGame, ComparisonMode, AnalysisState } from '../types';
 import { dbHelpers } from '../db';
-import { 
-  getFilteredShots, 
-  getFilteredGames, 
+import {
+  getFilteredShots,
+  getFilteredGames,
   getFilteredNormalizedShots,
   getFilteredGoalsAgainst,
-  calculateNormalizedZoneStats,
-  calculateGameStats, 
-  getZoneDisplayName, 
-  getEnhancedShotColor
+  calculateGameStats
 } from '../lib/utils/analysis';
-import { 
-  generateSmartInsights, 
-  getNormalizedRinkZone,
+import {
+  generateSmartInsights,
   type NormalizedShotWithGame,
   type NormalizedGoalAgainst
 } from '../utils/shotNormalization';
+import {
+  applyEnhancedFilters,
+  prepareMultiGameComparison,
+  aggregateMultipleGames,
+  generateMultiGameInsights,
+  calculateEnhancedZoneStats,
+  type GameComparisonData,
+  type MultiGameInsight
+} from '../lib/utils/enhancedAnalysis';
 import { exportGameReport, prepareGameReportData } from '../utils/pdfExport';
-import AdvancedCharts from '../components/AdvancedCharts';
-import { Filter, Target, TrendingUp, Calendar, Users, RotateCcw, Shield, Crosshair, Download, FileText } from 'lucide-react';
+
+// New enhanced components
+import GameSelector from '../components/analysis/GameSelector';
+import TimeBasedFilters from '../components/analysis/TimeBasedFilters';
+import AdvancedFilters from '../components/analysis/AdvancedFilters';
+import MultiRinkVisualization from '../components/analysis/MultiRinkVisualization';
+import InteractiveZoneAnalytics from '../components/analysis/InteractiveZoneAnalytics';
+import EnhancedInsightsPanel from '../components/analysis/EnhancedInsightsPanel';
+
+import { Filter, Target, TrendingUp, Calendar, Users, Download, BarChart3, ChevronDown, ChevronUp } from 'lucide-react';
 
 const DataAnalysis: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [filteredShots, setFilteredShots] = useState<ShotWithGame[]>([]);
   const [normalizedShots, setNormalizedShots] = useState<NormalizedShotWithGame[]>([]);
+  const [enhancedFilteredShots, setEnhancedFilteredShots] = useState<NormalizedShotWithGame[]>([]);
   const [normalizedGoalsAgainst, setNormalizedGoalsAgainst] = useState<NormalizedGoalAgainst[]>([]);
   const [filteredGames, setFilteredGames] = useState<Game[]>([]);
-  // Removed: zoneStats, gameStats, and smartInsights are now memoized
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'chart' | 'shot_heatmap' | 'goal_heatmap'>('chart');
-  const [showFilters, setShowFilters] = useState(false);
+  const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<'rink' | 'analytics'>('rink');
+
+  // Enhanced analysis state
+  const [analysisState, setAnalysisState] = useState<AnalysisState>({
+    selectedGameIds: [],
+    comparisonMode: 'overlay',
+    maxGamesForComparison: 10
+  });
+
+  // Enhanced filter states
+  const [selectedPeriods, setSelectedPeriods] = useState<number[]>([]);
+  const [timeRange, setTimeRange] = useState<{ from?: number; to?: number }>({});
+  const [selectedShotResults, setSelectedShotResults] = useState<ShotWithGame['result'][]>([]);
+  const [scoreSituation, setScoreSituation] = useState<'winning' | 'losing' | 'tied' | 'all'>('all');
 
   const rinkRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,21 +66,60 @@ const DataAnalysis: React.FC = () => {
     seasonId: '',
     teamId: '',
     dateFrom: '',
-    dateTo: ''
+    dateTo: '',
+    gameIds: [],
+    periods: [],
+    shotResults: [],
+    scoreSituation: 'all',
+    timeFrom: undefined,
+    timeTo: undefined
   });
 
-  // Memoized calculations for performance
+  // Enhanced filtering effect
+  useEffect(() => {
+    if (normalizedShots.length > 0) {
+      const enhancedFiltered = applyEnhancedFilters(normalizedShots, filteredGames, filters);
+      setEnhancedFilteredShots(enhancedFiltered);
+    } else {
+      setEnhancedFilteredShots([]);
+    }
+  }, [normalizedShots, filteredGames, filters]);
+
+  // Enhanced memoized calculations
   const memoizedZoneStats = useMemo(() => {
-    return calculateNormalizedZoneStats(normalizedShots);
-  }, [normalizedShots]);
+    return calculateEnhancedZoneStats(enhancedFilteredShots);
+  }, [enhancedFilteredShots]);
 
   const memoizedGameStats = useMemo(() => {
     return calculateGameStats(filteredShots, filteredGames);
   }, [filteredShots, filteredGames]);
 
   const memoizedSmartInsights = useMemo(() => {
-    return generateSmartInsights(normalizedShots);
-  }, [normalizedShots]);
+    return generateSmartInsights(enhancedFilteredShots);
+  }, [enhancedFilteredShots]);
+
+  // Multi-game comparison data
+  const gameComparisonData = useMemo((): GameComparisonData[] => {
+    if (analysisState.selectedGameIds.length === 0) return [];
+    return prepareMultiGameComparison(
+      analysisState.selectedGameIds,
+      enhancedFilteredShots,
+      filteredGames
+    );
+  }, [analysisState.selectedGameIds, enhancedFilteredShots, filteredGames]);
+
+  const aggregatedShots = useMemo(() => {
+    if (analysisState.comparisonMode === 'aggregate') {
+      return aggregateMultipleGames(gameComparisonData);
+    }
+    return enhancedFilteredShots;
+  }, [analysisState.comparisonMode, gameComparisonData, enhancedFilteredShots]);
+
+  // Multi-game insights
+  const multiGameInsights = useMemo((): MultiGameInsight[] => {
+    if (gameComparisonData.length < 2) return [];
+    return generateMultiGameInsights(gameComparisonData);
+  }, [gameComparisonData]);
 
   const memoizedPeriodBreakdown = useMemo(() => {
     const periodStats: Record<number, { shots: number; goals: number }> = { 1: { shots: 0, goals: 0 }, 2: { shots: 0, goals: 0 }, 3: { shots: 0, goals: 0 } };
@@ -249,10 +313,38 @@ const DataAnalysis: React.FC = () => {
     }
   }, []); // Run once after initial load
 
-  // Filter changes trigger new data fetch
+  // Enhanced filter effect - apply both base and enhanced filters
   useEffect(() => {
     applyFilters();
-  }, [filters]); // Only when filters change
+  }, [filters]);
+
+  // Apply enhanced filters when base data or enhanced filter states change
+  useEffect(() => {
+    if (normalizedShots.length === 0) {
+      setEnhancedFilteredShots([]);
+      return;
+    }
+
+    const enhancedFilters: AnalysisFilters = {
+      ...filters,
+      periods: selectedPeriods.length > 0 ? selectedPeriods : undefined,
+      shotResults: selectedShotResults.length > 0 ? selectedShotResults : undefined,
+      scoreSituation,
+      timeFrom: timeRange.from,
+      timeTo: timeRange.to
+    };
+
+    const enhanced = applyEnhancedFilters(normalizedShots, filteredGames, enhancedFilters);
+    setEnhancedFilteredShots(enhanced);
+  }, [
+    normalizedShots,
+    filteredGames,
+    selectedPeriods,
+    selectedShotResults,
+    scoreSituation,
+    timeRange,
+    filters
+  ]);
 
   // Generate heatmap/splash zones when view mode or data changes
   useEffect(() => {
@@ -324,8 +416,56 @@ const DataAnalysis: React.FC = () => {
       seasonId: '',
       teamId: '',
       dateFrom: '',
-      dateTo: ''
+      dateTo: '',
+      gameIds: [],
+      periods: [],
+      shotResults: [],
+      scoreSituation: 'all',
+      timeFrom: undefined,
+      timeTo: undefined
     });
+    setSelectedPeriods([]);
+    setSelectedShotResults([]);
+    setScoreSituation('all');
+    setTimeRange({});
+    setAnalysisState({
+      selectedGameIds: [],
+      comparisonMode: 'overlay',
+      maxGamesForComparison: 10
+    });
+  };
+
+  const toggleFilters = () => {
+    setIsFiltersExpanded(!isFiltersExpanded);
+  };
+
+  // Calculate active filter count
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filters.seasonId) count++;
+    if (filters.teamId) count++;
+    if (filters.dateFrom || filters.dateTo) count++;
+    if (selectedPeriods.length > 0) count++;
+    if (selectedShotResults.length > 0) count++;
+    if (scoreSituation !== 'all') count++;
+    if (timeRange.from !== undefined || timeRange.to !== undefined) count++;
+    if (analysisState.selectedGameIds.length > 0) count++;
+    return count;
+  }, [filters, selectedPeriods, selectedShotResults, scoreSituation, timeRange, analysisState.selectedGameIds]);
+
+  // Game selection handlers
+  const handleGameSelectionChange = (gameIds: string[]) => {
+    setAnalysisState(prev => ({ ...prev, selectedGameIds: gameIds }));
+    setFilters(prev => ({ ...prev, gameIds }));
+  };
+
+  const handleComparisonModeChange = (mode: ComparisonMode) => {
+    setAnalysisState(prev => ({ ...prev, comparisonMode: mode }));
+  };
+
+  // Zone interaction handler
+  const handleZoneClick = (zone: string) => {
+    setSelectedZone(selectedZone === zone ? undefined : zone);
   };
 
   const handleExportPDF = async () => {
@@ -464,584 +604,260 @@ const DataAnalysis: React.FC = () => {
     );
   }
 
-  return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Data Analysis</h1>
 
-      {/* Mobile Filter Toggle */}
-      <div className="lg:hidden mb-4">
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className="w-full bg-white rounded-lg shadow-md p-4 flex items-center justify-between touch-action-manipulation"
-        >
-          <div className="flex items-center space-x-2">
-            <Filter className="w-5 h-5 text-blue-600" />
-            <span className="font-semibold">Filters</span>
-            <span className="text-sm text-gray-500">
-              ({Object.values(filters).filter(v => v).length} active)
-            </span>
+  // Enhanced Data Analysis with Better Visual Design
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Clean Header */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="container mx-auto px-6 py-8">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+            <div className="mb-4 lg:mb-0">
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">Data Analysis</h1>
+              <p className="text-lg text-gray-600">Advanced multi-game analytics and insights</p>
+            </div>
+            <button
+              onClick={handleExportPDF}
+              className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition-colors shadow-sm"
+            >
+              <Download className="w-5 h-5" />
+              <span className="font-medium">Export Report</span>
+            </button>
           </div>
-          <div className={`transform transition-transform ${showFilters ? 'rotate-180' : ''}`}>
-            ▼
-          </div>
-        </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Filters Sidebar */}
-        <div className={`lg:col-span-1 ${showFilters ? 'block' : 'hidden lg:block'}`}>
-          <div className="bg-white rounded-lg shadow-md p-4 lg:p-6 lg:sticky lg:top-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold flex items-center space-x-2">
-                <Filter className="w-5 h-5" />
-                <span className="hidden lg:inline">Filters</span>
-                <span className="lg:hidden">Filter Options</span>
-              </h2>
-              <button
-                onClick={clearFilters}
-                className="text-sm text-blue-600 hover:text-blue-800 flex items-center space-x-1 touch-action-manipulation"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Clear</span>
-              </button>
+      {/* Main Content Area with Better Spacing */}
+      <div className="container mx-auto px-6 py-8">
+        {/* Collapsible Filters Bar */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-8">
+          <div
+            className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+            onClick={toggleFilters}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleFilters();
+              }
+            }}
+            aria-expanded={isFiltersExpanded}
+            aria-controls="filters-content"
+          >
+            <div className="flex items-center space-x-2">
+              <div className="relative">
+                <Filter className="w-5 h-5 text-gray-600" />
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-blue-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </div>
+              <h3 className="font-semibold text-lg">Filters</h3>
+              {activeFilterCount > 0 && (
+                <span className="text-sm text-blue-600 font-medium">
+                  ({activeFilterCount} active)
+                </span>
+              )}
             </div>
-
-            <div className="space-y-4">
-              {/* Season Filter */}
-              <div>
-                <label className="block text-sm font-medium mb-2">Season</label>
-                <select
-                  value={filters.seasonId || ''}
-                  onChange={(e) => setFilters({ ...filters, seasonId: e.target.value || undefined })}
-                  className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">All Seasons</option>
-                  {seasons.map(season => (
-                    <option key={season.id} value={season.id}>{season.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Team Filter */}
-              <div>
-                <label className="block text-sm font-medium mb-2">Team</label>
-                <select
-                  value={filters.teamId || ''}
-                  onChange={(e) => setFilters({ ...filters, teamId: e.target.value || undefined })}
-                  className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">All Teams</option>
-                  {teams.map(team => (
-                    <option key={team.id} value={team.id}>{team.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Date Range */}
-              <div>
-                <label className="block text-sm font-medium mb-2">From Date</label>
-                <input
-                  type="date"
-                  value={filters.dateFrom || ''}
-                  onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value || undefined })}
-                  className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">To Date</label>
-                <input
-                  type="date"
-                  value={filters.dateTo || ''}
-                  onChange={(e) => setFilters({ ...filters, dateTo: e.target.value || undefined })}
-                  className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+            <div className="flex items-center space-x-2">
+              {isFiltersExpanded ? (
+                <ChevronUp className="w-5 h-5 text-gray-600 transition-transform duration-200" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-gray-600 transition-transform duration-200" />
+              )}
             </div>
+          </div>
 
-            {/* Filter Summary */}
-            <div className="mt-4 pt-4 border-t">
-              <div className="text-sm text-gray-600">
-                <div className="flex items-center space-x-2 mb-1">
-                  <Target className="w-4 h-4" />
-                  <span>{normalizedShots.length} shots analyzed</span>
+          <div
+            id="filters-content"
+            className={`transition-all duration-200 ease-in-out overflow-hidden ${
+              isFiltersExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
+            }`}
+          >
+            <div className="px-6 pb-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Game Selector */}
+                <div>
+                  <GameSelector
+                    games={filteredGames}
+                    selectedGameIds={analysisState.selectedGameIds}
+                    onSelectionChange={(gameIds) => setAnalysisState(prev => ({
+                      ...prev,
+                      selectedGameIds: gameIds
+                    }))}
+                    comparisonMode={analysisState.comparisonMode}
+                    onComparisonModeChange={(mode) => setAnalysisState(prev => ({
+                      ...prev,
+                      comparisonMode: mode
+                    }))}
+                    maxSelections={10}
+                  />
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Calendar className="w-4 h-4" />
-                  <span>{filteredGames.length} games</span>
+
+                {/* Advanced Filters */}
+                <div>
+                  <AdvancedFilters
+                    filters={filters}
+                    onFiltersChange={setFilters}
+                    gameCount={filteredGames.length}
+                  />
+                </div>
+
+                {/* Time-Based Filters */}
+                <div>
+                  <TimeBasedFilters
+                    filters={filters}
+                    onFiltersChange={setFilters}
+                    totalPeriods={3}
+                  />
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Main Content */}
-        <div className="lg:col-span-3 space-y-6">
-          {/* Summary Stats Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
-              <div className="flex items-center space-x-1 sm:space-x-2">
-                <Target className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" />
-                <h3 className="font-semibold text-xs sm:text-base">Total Shots</h3>
+        {/* Key Stats Cards - Full Width */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                <Target className="w-6 h-6 text-blue-600" />
               </div>
-              <div className="text-lg sm:text-2xl font-bold text-blue-600 mt-1 sm:mt-2">
-                {memoizedGameStats?.totalShots || 0}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
-              <div className="flex items-center space-x-1 sm:space-x-2">
-                <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" />
-                <h3 className="font-semibold text-xs sm:text-base">Goal %</h3>
-              </div>
-              <div className="text-lg sm:text-2xl font-bold text-green-600 mt-1 sm:mt-2">
-                {memoizedGameStats?.goalPercentage || 0}%
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
-              <div className="flex items-center space-x-1 sm:space-x-2">
-                <Users className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" />
-                <h3 className="font-semibold text-xs sm:text-base">Shots/Game</h3>
-              </div>
-              <div className="text-lg sm:text-2xl font-bold text-purple-600 mt-1 sm:mt-2">
-                {memoizedGameStats?.shotsPerGame || 0}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg shadow-md p-3 sm:p-4">
-              <div className="flex items-center space-x-1 sm:space-x-2">
-                <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" />
-                <h3 className="font-semibold text-xs sm:text-base">Games</h3>
-              </div>
-              <div className="text-lg sm:text-2xl font-bold text-orange-600 mt-1 sm:mt-2">
-                {filteredGames.length}
+              <div>
+                <p className="text-sm font-medium text-gray-600">Total Shots</p>
+                <p className="text-2xl font-bold text-gray-900">{enhancedFilteredShots.length}</p>
               </div>
             </div>
           </div>
 
-          {/* Shot Chart */}
-          <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
-            <div className="flex flex-col space-y-3 sm:space-y-0 sm:flex-row sm:justify-between sm:items-center mb-4">
-              <div className="flex items-center justify-between w-full sm:w-auto">
-                <h2 className="text-lg sm:text-xl font-semibold">Shot Analysis</h2>
-
-                {/* Export Button - Mobile */}
-                <button
-                  onClick={handleExportPDF}
-                  className="sm:hidden bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg transition-colors touch-action-manipulation"
-                  title="Export PDF Report"
-                >
-                  <Download className="w-4 h-4" />
-                </button>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                <TrendingUp className="w-6 h-6 text-green-600" />
               </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-3">
-                {/* Toggle Buttons - Mobile Optimized */}
-                <div className="grid grid-cols-3 sm:flex rounded-lg border border-gray-300 p-1 bg-gray-50 gap-1 sm:gap-0">
-                  <button
-                    onClick={() => setViewMode('chart')}
-                    className={`px-2 py-2 sm:px-3 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors touch-action-manipulation ${
-                      viewMode === 'chart'
-                        ? 'bg-blue-500 text-white'
-                        : 'text-gray-700 hover:text-blue-600'
-                    }`}
-                  >
-                    Chart
-                  </button>
-                  <button
-                    onClick={() => setViewMode('shot_heatmap')}
-                    className={`px-2 py-2 sm:px-3 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors touch-action-manipulation ${
-                      viewMode === 'shot_heatmap'
-                        ? 'bg-orange-500 text-white'
-                        : 'text-gray-700 hover:text-orange-600'
-                    }`}
-                  >
-                    Shots
-                  </button>
-                  <button
-                    onClick={() => setViewMode('goal_heatmap')}
-                    className={`px-2 py-2 sm:px-3 sm:py-1 rounded text-xs sm:text-sm font-medium transition-colors touch-action-manipulation ${
-                      viewMode === 'goal_heatmap'
-                        ? 'bg-red-500 text-white'
-                        : 'text-gray-700 hover:text-red-600'
-                    }`}
-                  >
-                    Goals
-                  </button>
-                </div>
-
-                {/* Export Button - Desktop */}
-                <button
-                  onClick={handleExportPDF}
-                  className="hidden sm:flex items-center space-x-2 bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-lg transition-colors touch-action-manipulation"
-                  title="Export PDF Report"
-                >
-                  <FileText className="w-4 h-4" />
-                  <span className="text-sm font-medium">Export PDF</span>
-                </button>
+              <div>
+                <p className="text-sm font-medium text-gray-600">Goal %</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {enhancedFilteredShots.length > 0
+                    ? ((enhancedFilteredShots.filter(s => s.result === 'goal').length / enhancedFilteredShots.length) * 100).toFixed(1)
+                    : 0}%
+                </p>
               </div>
             </div>
-            
-            
-            <div className="relative">
-              {/* Rink Background */}
-              <div
-                ref={rinkRef}
-                data-shot-chart
-                className="relative w-full bg-center bg-contain bg-no-repeat border border-gray-300 rounded"
-                style={{
-                  backgroundImage: 'url(/images/rink.png), url(/images/rink-placeholder.svg)',
-                  backgroundSize: 'contain',
-                  aspectRatio: '2/1',
-                  minHeight: '300px'
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                <Users className="w-6 h-6 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-600">Games</p>
+                <p className="text-2xl font-bold text-gray-900">{filteredGames.length}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center space-x-3">
+              <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
+                <Calendar className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-600">Active Zones</p>
+                <p className="text-2xl font-bold text-gray-900">{memoizedZoneStats.length}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main Analytics Section - Better Use of Space */}
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+          {/* Zone Analytics - Expanded Space */}
+          <div className="xl:col-span-3">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+              <InteractiveZoneAnalytics
+                zoneStats={memoizedZoneStats}
+                onZoneClick={(zone) => {
+                  console.log('Zone clicked:', zone);
+                  // Future enhancement: filter by zone
                 }}
-              >
-                {/* Rink Zone Labels */}
-                <div className="absolute inset-0 pointer-events-none">
-                  {/* Defensive Zone Label (Left) */}
-                  <div className="absolute left-2 top-1/2 transform -translate-y-1/2 bg-blue-100 bg-opacity-90 rounded-lg px-2 py-1 border border-blue-300">
-                    <div className="flex items-center space-x-1 text-blue-700 text-xs font-semibold">
-                      <Shield className="w-3 h-3" />
-                      <span>DEFENSIVE</span>
-                    </div>
-                  </div>
-                  
-                  {/* Offensive Zone Label (Right) */}
-                  <div className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-green-100 bg-opacity-90 rounded-lg px-2 py-1 border border-green-300">
-                    <div className="flex items-center space-x-1 text-green-700 text-xs font-semibold">
-                      <Crosshair className="w-3 h-3" />
-                      <span>OFFENSIVE</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Splash Zone Canvas */}
-                {(viewMode === 'shot_heatmap' || viewMode === 'goal_heatmap') && (
-                  <canvas
-                    ref={canvasRef}
-                    className="absolute inset-0 w-full h-full opacity-80 pointer-events-none"
-                    style={{
-                      objectFit: 'contain',
-                      zIndex: 5
-                    }}
-                  />
-                )}
-                
-                {/* Shot Overlays - only show in chart mode */}
-                {viewMode === 'chart' && normalizedShots.map((shot, index) => {
-                  const position = getShotPosition(shot);
-                  const color = getEnhancedShotColor(shot.result, shot.dangerLevel);
-                  
-                  return (
-                    <div
-                      key={`${shot.id}-${index}`}
-                      className="absolute w-3 h-3 rounded-full transform -translate-x-1/2 -translate-y-1/2 border border-white shadow-sm hover:scale-150 transition-transform cursor-pointer"
-                      style={{
-                        backgroundColor: color,
-                        left: position.left,
-                        top: position.top,
-                        zIndex: 10
-                      }}
-                      title={`${shot.result.charAt(0).toUpperCase() + shot.result.slice(1)} - ${getNormalizedRinkZone(shot.normalizedX, shot.normalizedY)} (${shot.dangerLevel} danger)`}
-                    />
-                  );
-                })}
-                
-                {/* Goals Against Overlays - defensive zone */}
-                {normalizedGoalsAgainst.map((goal, index) => (
-                  <div
-                    key={`goal-against-${goal.id}-${index}`}
-                    className="absolute transform -translate-x-1/2 -translate-y-1/2 text-red-500 font-bold text-lg hover:scale-150 transition-transform cursor-pointer"
-                    style={{
-                      left: `${goal.normalizedX * 100}%`,
-                      top: `${goal.normalizedY * 100}%`,
-                      zIndex: 12
-                    }}
-                    title={`Goal Against - Period ${goal.period}`}
-                  >
-                    ❌
-                  </div>
-                ))}
-              </div>
-
-              {/* Legend */}
-              <div className="flex justify-center mt-4">
-                {viewMode === 'chart' && (
-                  <div className="flex flex-col items-center space-y-2">
-                    <div className="flex flex-wrap justify-center space-x-4">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                        <span className="text-sm">Goals</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                        <span className="text-sm">Saves</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-3 h-3 rounded-full bg-gray-500"></div>
-                        <span className="text-sm">Misses</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-                        <span className="text-sm">Blocked</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-4 text-xs">
-                      <div className="flex items-center space-x-1">
-                        <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                        <span>High Danger</span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                        <span>Medium Danger</span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <div className="w-2 h-2 rounded-full bg-gray-400"></div>
-                        <span>Low Danger</span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <span className="text-red-500 text-sm">❌</span>
-                        <span>Goals Against</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {viewMode === 'shot_heatmap' && (
-                  <div className="flex flex-col items-center space-y-2">
-                    <div className="flex items-center space-x-4">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded-full bg-blue-500"></div>
-                        <span className="text-sm">Cold Zones</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded-full bg-green-500"></div>
-                        <span className="text-sm">Warm Zones</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded-full bg-yellow-500"></div>
-                        <span className="text-sm">Hot Zones</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded-full bg-red-500"></div>
-                        <span className="text-sm">Danger Zones</span>
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-500">Larger zones = more shots clustered</div>
-                  </div>
-                )}
-                
-                {viewMode === 'goal_heatmap' && (
-                  <div className="flex flex-col items-center space-y-2">
-                    <div className="flex items-center space-x-4">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded-full bg-red-500"></div>
-                        <span className="text-sm">Low Efficiency (&lt;25%)</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded-full bg-yellow-500"></div>
-                        <span className="text-sm">Med Efficiency (25-50%)</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 rounded-full bg-green-500"></div>
-                        <span className="text-sm">High Efficiency (50%+)</span>
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-500">Shows goals/shots ratio in each zone</div>
-                  </div>
-                )}
-              </div>
+                selectedZone={undefined}
+                showComparison={false}
+              />
             </div>
           </div>
 
-          {/* Smart Insights Panel */}
-          {normalizedShots.length > 0 && memoizedSmartInsights.length > 0 && (
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Smart Insights</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-                {memoizedSmartInsights.map((insight, index) => {
-                  const bgColor = insight.type === 'positive' ? 'bg-green-50 border-green-200' : 
-                                 insight.type === 'negative' ? 'bg-red-50 border-red-200' : 
-                                 'bg-blue-50 border-blue-200';
-                  const textColor = insight.type === 'positive' ? 'text-green-600' : 
-                                   insight.type === 'negative' ? 'text-red-600' : 
-                                   'text-blue-600';
-                  
-                  return (
-                    <div key={index} className={`${bgColor} border rounded-lg p-3`}>
-                      <div className={`${textColor} font-medium flex items-center space-x-2`}>
-                        <span>{insight.icon}</span>
-                        <span className="text-xs">{insight.text}</span>
-                      </div>
-                      {insight.value && (
-                        <div className="text-gray-600 text-xs mt-1">{insight.value}</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          
-          {/* Legacy Quick Insights Panel (fallback) */}
-          {normalizedShots.length > 0 && memoizedSmartInsights.length === 0 && (() => {
-            const insights = getInsights();
-            return insights ? (
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h2 className="text-xl font-semibold mb-4">Quick Insights</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                    <div className="text-red-600 font-medium">Hottest Zone</div>
-                    <div className="text-gray-800">{insights.hottestZone.name}</div>
-                    <div className="text-gray-600">({insights.hottestZone.shots} shots)</div>
-                  </div>
-                  
-                  {insights.bestSuccessZone && (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                      <div className="text-green-600 font-medium">Best Success Zone</div>
-                      <div className="text-gray-800">{insights.bestSuccessZone.name}</div>
-                      <div className="text-gray-600">({insights.bestSuccessZone.percentage.toFixed(1)}% goals)</div>
-                    </div>
-                  )}
-                  
-                  {insights.coldestZone && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                      <div className="text-blue-600 font-medium">Coldest Zone</div>
-                      <div className="text-gray-800">{insights.coldestZone.name}</div>
-                      <div className="text-gray-600">({insights.coldestZone.shots} shots)</div>
-                    </div>
-                  )}
-                  
-                  {insights.worstSuccessZone && (
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
-                      <div className="text-orange-600 font-medium">Avoid Zone</div>
-                      <div className="text-gray-800">{insights.worstSuccessZone.name}</div>
-                      <div className="text-gray-600">(only {insights.worstSuccessZone.percentage.toFixed(1)}% success)</div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : null;
-          })()}
-
-          {/* Advanced Analytics */}
-          <AdvancedCharts shots={filteredShots} className="mb-6" />
-
-          {/* Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Shot Results Pie Chart */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Shot Results</h2>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={memoizedShotResultData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {memoizedShotResultData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Period Breakdown Chart */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Period Breakdown</h2>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={memoizedPeriodBreakdown}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="period" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="shots" fill="#3b82f6" name="Shots" />
-                    <Bar dataKey="goals" fill="#22c55e" name="Goals" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Zone Statistics */}
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Shooting % by Zone</h2>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={memoizedZoneChartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis 
-                      dataKey="zone" 
-                      angle={-45}
-                      textAnchor="end"
-                      height={80}
-                      fontSize={12}
-                    />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="percentage" fill="#3b82f6" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+          {/* Insights Panel - Right Sidebar */}
+          <div className="xl:col-span-1">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+              <EnhancedInsightsPanel
+                shots={enhancedFilteredShots}
+                zoneStats={memoizedZoneStats}
+                multiGameInsights={multiGameInsights}
+                gameCount={analysisState.selectedGameIds.length || filteredGames.length}
+                periodBreakdown={memoizedPeriodBreakdown}
+                className="h-full"
+              />
             </div>
           </div>
+        </div>
 
-          {/* Zone Statistics Table */}
-          {memoizedZoneStats.length > 0 && (
-            <div className="bg-white rounded-lg shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4">Zone Breakdown</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-2 text-left">Zone</th>
-                      <th className="px-4 py-2 text-center">Shots</th>
-                      <th className="px-4 py-2 text-center">Goals</th>
-                      <th className="px-4 py-2 text-center">Saves</th>
-                      <th className="px-4 py-2 text-center">Misses</th>
-                      <th className="px-4 py-2 text-center">Goal %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {memoizedZoneStats
-                      .sort((a, b) => b.percentage - a.percentage)
-                      .map((zone) => (
-                        <tr key={zone.zone} className="border-t">
-                          <td className="px-4 py-2 font-medium">{getZoneDisplayName(zone.zone)}</td>
-                          <td className="px-4 py-2 text-center">{zone.shots}</td>
-                          <td className="px-4 py-2 text-center text-green-600 font-medium">{zone.goals}</td>
-                          <td className="px-4 py-2 text-center text-blue-600">{zone.saves}</td>
-                          <td className="px-4 py-2 text-center text-gray-600">{zone.misses}</td>
-                          <td className="px-4 py-2 text-center font-bold">
-                            {zone.percentage.toFixed(1)}%
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+        {/* Multi-Game Visualization Section */}
+        <div className="mt-8">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-4 lg:mb-0">Multi-Game Visualization</h2>
+
+              {/* Cleaner View Toggle */}
+              <div className="flex bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setActiveTab('rink')}
+                  className={`px-4 py-2 rounded-md transition-colors flex items-center space-x-2 ${
+                    activeTab === 'rink'
+                      ? 'bg-white shadow-sm text-blue-600 font-medium'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  <Target className="w-4 h-4" />
+                  <span>Rink View</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('analytics')}
+                  className={`px-4 py-2 rounded-md transition-colors flex items-center space-x-2 ${
+                    activeTab === 'analytics'
+                      ? 'bg-white shadow-sm text-blue-600 font-medium'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span>Charts</span>
+                </button>
               </div>
             </div>
-          )}
 
-          {/* Empty State */}
-          {normalizedShots.length === 0 && !loading && (
-            <div className="bg-white rounded-lg shadow-md p-12 text-center">
-              <Target className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No shot data found</h3>
-              <p className="text-gray-500 mb-4">
-                Try adjusting your filters or track some games to see analytics
-              </p>
+            {/* Content Area */}
+            <div className="min-h-96">
+              {activeTab === 'rink' && (
+                <MultiRinkVisualization
+                  gameComparisons={gameComparisonData}
+                  comparisonMode={analysisState.comparisonMode}
+                  aggregatedShots={aggregatedShots}
+                  className="w-full"
+                />
+              )}
+
+              {activeTab === 'analytics' && (
+                <div className="bg-gray-50 rounded-lg p-8 text-center">
+                  <BarChart3 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">Advanced Charts</h3>
+                  <p className="text-gray-600">Enhanced analytics and comparison charts coming soon</p>
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
