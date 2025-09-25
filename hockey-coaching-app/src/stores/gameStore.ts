@@ -15,6 +15,12 @@ interface GameStore extends GameState {
   };
   lastSyncTime: number | null;
   isSyncing: boolean;
+  // Last action tracking for undo (30 second window)
+  lastAction: {
+    type: 'shot' | 'goal_against' | 'faceoff_win' | 'faceoff_loss';
+    timestamp: number;
+    wasGoal?: boolean; // For shots that resulted in goals
+  } | null;
   // Actions
   setCurrentGame: (game: Game | null) => void;
   syncToFirebase: () => Promise<void>;
@@ -43,7 +49,8 @@ interface GameStore extends GameState {
   addHomeGoal: () => Promise<void>;
   addAwayGoal: () => Promise<void>;
   // Undo functionality
-  undoLastShot: () => Promise<boolean>;
+  undoLastAction: () => Promise<boolean>;
+  canUndo: () => boolean;
   // Timeout management
   useTimeout: () => Promise<void>;
   // Faceoff tracking
@@ -74,6 +81,7 @@ export const useGameStore = create<GameStore>()(
       },
       lastSyncTime: null,
       isSyncing: false,
+      lastAction: null,
 
       // Actions
       setCurrentGame: (game) => set({ currentGame: game }),
@@ -260,7 +268,12 @@ export const useGameStore = create<GameStore>()(
         // Store locally only - Firebase sync happens later
         set({
           shots: [...shots, shot],
-          pendingChanges: { ...pendingChanges, shots: true }
+          pendingChanges: { ...pendingChanges, shots: true },
+          lastAction: {
+            type: 'shot',
+            timestamp: Date.now(),
+            wasGoal: shotData.result === 'goal'
+          }
         });
       },
 
@@ -279,7 +292,11 @@ export const useGameStore = create<GameStore>()(
         // Store locally only - Firebase sync happens later
         set({
           goalsAgainst: [...goalsAgainst, goal],
-          pendingChanges: { ...pendingChanges, goalsAgainst: true }
+          pendingChanges: { ...pendingChanges, goalsAgainst: true },
+          lastAction: {
+            type: 'goal_against',
+            timestamp: Date.now()
+          }
         });
       },
 
@@ -525,22 +542,6 @@ export const useGameStore = create<GameStore>()(
         get().pauseTracking();
       },
 
-      // Undo functionality
-      undoLastShot: async () => {
-        const { currentGame, shots } = get();
-        if (!currentGame || shots.length === 0) return false;
-
-        // Get the last shot
-        const lastShot = shots[shots.length - 1];
-        
-        // Remove from database
-        await dbHelpers.deleteShot(lastShot.id);
-        
-        // Update local state
-        set({ shots: shots.slice(0, -1) });
-        
-        return true;
-      },
 
       // Timeout management
       useTimeout: async () => {
@@ -565,10 +566,165 @@ export const useGameStore = create<GameStore>()(
       // Faceoff tracking
       addFaceoffWin: async () => {
         await get().addGameEvent('faceoff_won', 'Faceoff won');
+        set({
+          lastAction: {
+            type: 'faceoff_win',
+            timestamp: Date.now()
+          }
+        });
       },
 
       addFaceoffLoss: async () => {
         await get().addGameEvent('faceoff_lost', 'Faceoff lost');
+        set({
+          lastAction: {
+            type: 'faceoff_loss',
+            timestamp: Date.now()
+          }
+        });
+      },
+
+      // Enhanced undo functionality
+      canUndo: () => {
+        const { lastAction } = get();
+        if (!lastAction) return false;
+
+        // Allow undo within 30 seconds
+        const timeDiff = Date.now() - lastAction.timestamp;
+        return timeDiff <= 30000; // 30 seconds
+      },
+
+      undoLastAction: async () => {
+        const {
+          currentGame,
+          shots,
+          goalsAgainst,
+          events,
+          lastAction,
+          pendingChanges
+        } = get();
+
+        if (!currentGame || !lastAction) return false;
+
+        // Check time window
+        const timeDiff = Date.now() - lastAction.timestamp;
+        if (timeDiff > 30000) return false; // 30 seconds limit
+
+        try {
+          let updateState: any = { lastAction: null };
+
+          switch (lastAction.type) {
+            case 'shot':
+              if (shots.length === 0) return false;
+
+              const lastShot = shots[shots.length - 1];
+              updateState.shots = shots.slice(0, -1);
+              updateState.pendingChanges = { ...pendingChanges, shots: true };
+
+              // If shot was a goal, revert score
+              if (lastAction.wasGoal && lastShot.result === 'goal') {
+                const newHomeScore = Math.max(0, (currentGame.homeScore || 0) - 1);
+                updateState.currentGame = { ...currentGame, homeScore: newHomeScore };
+                updateState.pendingChanges.gameState = true;
+
+                // Remove the goal event from events
+                let goalEventIndex = -1;
+                for (let i = events.length - 1; i >= 0; i--) {
+                  if (events[i].type === 'goal_home' &&
+                      Math.abs(events[i].timestamp - lastShot.timestamp) < 1000) {
+                    goalEventIndex = i;
+                    break;
+                  }
+                }
+                if (goalEventIndex >= 0) {
+                  updateState.events = [
+                    ...events.slice(0, goalEventIndex),
+                    ...events.slice(goalEventIndex + 1)
+                  ];
+                  updateState.pendingChanges.events = true;
+                }
+              }
+              break;
+
+            case 'goal_against':
+              if (goalsAgainst.length === 0) return false;
+
+              const lastGoalAgainst = goalsAgainst[goalsAgainst.length - 1];
+              updateState.goalsAgainst = goalsAgainst.slice(0, -1);
+              updateState.pendingChanges = { ...pendingChanges, goalsAgainst: true };
+
+              // Revert away team score
+              const newAwayScore = Math.max(0, (currentGame.awayScore || 0) - 1);
+              updateState.currentGame = { ...currentGame, awayScore: newAwayScore };
+              updateState.pendingChanges.gameState = true;
+
+              // Remove the goal against event from events
+              let goalAgainstEventIndex = -1;
+              for (let i = events.length - 1; i >= 0; i--) {
+                if (events[i].type === 'goal_away' &&
+                    Math.abs(events[i].timestamp - lastGoalAgainst.timestamp) < 1000) {
+                  goalAgainstEventIndex = i;
+                  break;
+                }
+              }
+              if (goalAgainstEventIndex >= 0) {
+                updateState.events = [
+                  ...events.slice(0, goalAgainstEventIndex),
+                  ...events.slice(goalAgainstEventIndex + 1)
+                ];
+                updateState.pendingChanges.events = true;
+              }
+              break;
+
+            case 'faceoff_win':
+              // Remove last faceoff_won event
+              let faceoffWinIndex = -1;
+              for (let i = events.length - 1; i >= 0; i--) {
+                if (events[i].type === 'faceoff_won' &&
+                    Math.abs(events[i].timestamp - lastAction.timestamp) < 1000) {
+                  faceoffWinIndex = i;
+                  break;
+                }
+              }
+              if (faceoffWinIndex >= 0) {
+                updateState.events = [
+                  ...events.slice(0, faceoffWinIndex),
+                  ...events.slice(faceoffWinIndex + 1)
+                ];
+                updateState.pendingChanges = { ...pendingChanges, events: true };
+              }
+              break;
+
+            case 'faceoff_loss':
+              // Remove last faceoff_lost event
+              let faceoffLossIndex = -1;
+              for (let i = events.length - 1; i >= 0; i--) {
+                if (events[i].type === 'faceoff_lost' &&
+                    Math.abs(events[i].timestamp - lastAction.timestamp) < 1000) {
+                  faceoffLossIndex = i;
+                  break;
+                }
+              }
+              if (faceoffLossIndex >= 0) {
+                updateState.events = [
+                  ...events.slice(0, faceoffLossIndex),
+                  ...events.slice(faceoffLossIndex + 1)
+                ];
+                updateState.pendingChanges = { ...pendingChanges, events: true };
+              }
+              break;
+
+            default:
+              return false;
+          }
+
+          set(updateState);
+          return true;
+
+        } catch (error) {
+          console.error('Undo failed:', error);
+          return false;
+        }
       }
     }),
     {

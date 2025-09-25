@@ -123,6 +123,28 @@ export interface AnalysisFilters {
   dateFrom?: string;
   dateTo?: string;
   gameIds?: string[];
+  // New advanced filters
+  periods?: number[];
+  shotResults?: ShotResult[];
+  scoreSituation?: 'winning' | 'losing' | 'tied' | 'all';
+  timeFrom?: number; // Minutes from period start
+  timeTo?: number; // Minutes from period start
+}
+
+// Multi-game analysis types
+export type ComparisonMode = 'overlay' | 'side-by-side' | 'aggregate';
+
+export interface GameSelectionPreset {
+  id: string;
+  name: string;
+  description: string;
+  gameIds: string[];
+}
+
+export interface AnalysisState {
+  selectedGameIds: string[];
+  comparisonMode: ComparisonMode;
+  maxGamesForComparison: number;
 }
 
 export interface ZoneStats {

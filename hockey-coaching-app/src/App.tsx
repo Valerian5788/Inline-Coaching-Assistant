@@ -8,6 +8,7 @@ import Seasons from './pages/Seasons';
 import DataAnalysis from './pages/DataAnalysis';
 import Training from './pages/Training';
 import DrillDesigner from './pages/Training/DrillDesigner';
+import DrillDesignerKonva from './pages/Training/DrillDesignerKonva';
 import PracticePlanner from './pages/Training/PracticePlanner';
 import ShotTracking from './pages/LiveTracking/ShotTracking';
 import DrawPlay from './pages/LiveTracking/DrawPlay';
@@ -37,6 +38,8 @@ const AuthenticatedApp = () => {
         {/* Training subpages */}
         <Route path="/training/drill-designer" element={<DrillDesigner />} />
         <Route path="/training/drill-designer/:id" element={<DrillDesigner />} />
+        <Route path="/training/drill-designer-konva" element={<DrillDesignerKonva />} />
+        <Route path="/training/drill-designer-konva/:id" element={<DrillDesignerKonva />} />
         <Route path="/training/practice-planner" element={<PracticePlanner />} />
         <Route path="/training/practice-planner/:id" element={<PracticePlanner />} />
       </Routes>

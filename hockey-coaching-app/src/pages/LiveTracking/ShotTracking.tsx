@@ -32,14 +32,14 @@ const ShotTracking: React.FC = () => {
     isTracking,
     isPaused,
     gameTime,
-    shots,
     events,
     startTracking,
     pauseTracking,
     resumeTracking,
     addShot,
     addGoalAgainst,
-    undoLastShot,
+    undoLastAction,
+    canUndo,
     adjustTime,
     addFaceoffWin,
     addFaceoffLoss
@@ -48,14 +48,14 @@ const ShotTracking: React.FC = () => {
   // Keyboard handler for undo
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === 'z' && !showShotPopup && !showGoalAgainstPopup) {
+      if (event.key.toLowerCase() === 'z' && !showShotPopup && !showGoalAgainstPopup && canUndo()) {
         handleUndo();
       }
     };
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [showShotPopup, showGoalAgainstPopup]);
+  }, [showShotPopup, showGoalAgainstPopup, canUndo]);
 
   // Manage start tracking button and faceoff ribbon
   useEffect(() => {
@@ -105,16 +105,16 @@ const ShotTracking: React.FC = () => {
   };
 
   const handleUndo = async () => {
-    if (!currentGame || shots.length === 0) return;
-    
-    const success = await undoLastShot();
+    if (!currentGame || !canUndo()) return;
+
+    const success = await undoLastAction();
     if (success) {
       // Show toast notification
       const toast = document.createElement('div');
       toast.className = 'fixed top-20 left-1/2 transform -translate-x-1/2 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
-      toast.textContent = 'Shot removed';
+      toast.textContent = 'Last action undone';
       document.body.appendChild(toast);
-      
+
       setTimeout(() => {
         document.body.removeChild(toast);
       }, 2000);
@@ -372,13 +372,13 @@ const ShotTracking: React.FC = () => {
           </div>
         </div>
 
-        {/* Undo button - only show if there are shots */}
-        {shots.length > 0 && (
+        {/* Undo button - show if can undo within time window */}
+        {canUndo() && (
           <div className="absolute bottom-24 left-4 pointer-events-auto">
             <button
               onClick={handleUndo}
               className="bg-orange-500 hover:bg-orange-600 text-white p-3 rounded-full shadow-lg transition-colors"
-              title="Undo last shot (Z key)"
+              title="Undo last action (Z key) - 30 sec window"
             >
               <Undo className="w-6 h-6" />
             </button>

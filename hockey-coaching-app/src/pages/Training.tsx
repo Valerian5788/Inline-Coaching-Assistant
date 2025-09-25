@@ -358,11 +358,18 @@ const Training: React.FC = () => {
         
         <div className="flex flex-col sm:flex-row gap-2">
           <Link
-            to="/training/drill-designer"
+            to="/training/drill-designer-konva"
             className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
           >
             <Plus className="w-4 h-4" />
-            New Drill
+            New Drill (Pro)
+          </Link>
+          <Link
+            to="/training/drill-designer"
+            className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Drill (Legacy)
           </Link>
           <Link
             to="/training/practice-planner"
